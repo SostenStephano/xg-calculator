@@ -1,0 +1,33 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "predictions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "kickoff", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "results",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "kickoff", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "accuracy",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "gradedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "accuracy",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "gradedAt", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

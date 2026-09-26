@@ -1,0 +1,13 @@
+{
+  "name": "xg-sync",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "sync": "node sync.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "axios": "^1.7.7"
+  }
+}

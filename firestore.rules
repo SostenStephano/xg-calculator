@@ -1,0 +1,25 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /predictions/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /results/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /accuracy/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /accuracyStats/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    // Models are private
+    match /models/{docId} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,28 @@
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Node
+node_modules/
+scripts/node_modules/
+
+# Env / secrets — NEVER commit
+.env
+.env.local
+scripts/.env
+serviceAccountKey.json
+*-service-account.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Build
+dist/
+build/
