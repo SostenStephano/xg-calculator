@@ -42,7 +42,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 });
 
-// ═══════════ FIXTURES PAGE ═══════════
+// ═══════════ FIXTURES ═══════════
 let allPredictions = [];
 let fixturesLeagueFilter = "";
 
@@ -134,33 +134,44 @@ function renderFixtureDetails(p) {
   const stats = computeStats(p.xgHome, p.xgAway);
   const tips = buildTips(stats);
 
-  const scoresHtml = stats.top5.map((s, i) =>
-    `<div class="score-chip${i === 0 ? " top" : ""}">
-       <div class="score">${s.k}–${s.h}</div>
-       <div class="prob">${(s.p * 100).toFixed(1)}%</div>
-     </div>`
-  ).join("");
+  const hPct = (stats.pH * 100).toFixed(1);
+  const dPct = (stats.pD * 100).toFixed(1);
+  const aPct = (stats.pA * 100).toFixed(1);
 
-  const total = stats.pH + stats.pD + stats.pA;
-  const hPct = Math.round(stats.pH / total * 100);
-  const dPct = Math.round(stats.pD / total * 100);
-  const aPct = 100 - hPct - dPct;
-
-  const resultHtml = `
-    <div class="result-bar">
-      <div class="result-seg home" style="width:${hPct}%">${hPct}%</div>
-      <div class="result-seg draw" style="width:${dPct}%">${dPct}%</div>
-      <div class="result-seg away" style="width:${aPct}%">${aPct}%</div>
-    </div>
-    <div class="result-labels">
-      <span>🏠 ${escapeHtml(p.homeTeam)}</span>
-      <span>🤝 Draw</span>
-      <span>✈️ ${escapeHtml(p.awayTeam)}</span>
+  // 1. Outcome Probabilities — 3 cards
+  const outcomeHtml = `
+    <div class="outcome-bar">
+      <div class="outcome home-win">
+        <div class="pct">${hPct}%</div>
+        <div class="lbl">${escapeHtml(p.homeTeam)} Win</div>
+      </div>
+      <div class="outcome draw">
+        <div class="pct">${dPct}%</div>
+        <div class="lbl">Draw</div>
+      </div>
+      <div class="outcome away-win">
+        <div class="pct">${aPct}%</div>
+        <div class="lbl">${escapeHtml(p.awayTeam)} Win</div>
+      </div>
     </div>
   `;
 
+  // 2. Top 5 Scorelines — numbered list
+  const top5Html = stats.top5.map((s, i) => `
+    <li class="${i === 0 ? "top-1" : ""}">
+      <span class="rank">${i + 1}</span>
+      <span class="scoreline">
+        ${s.k} – ${s.h}
+        <span class="team">${escapeHtml(p.homeTeam)} vs ${escapeHtml(p.awayTeam)}</span>
+      </span>
+      <span class="prob">${(s.p * 100).toFixed(2)}%</span>
+    </li>
+  `).join("");
+
+  // 3. Score matrix
   const matrixHtml = renderScoreMatrixTable(stats.matrix, stats.maxGoals);
 
+  // 4. Tips — filtered so they never contradict any of the top 5 scorelines
   const tipsHtml = tips.length
     ? tips.map(t => `
       <div class="tip ${confidenceClass(t.p)}">
@@ -169,33 +180,26 @@ function renderFixtureDetails(p) {
         <div class="tip-prob">${(t.p * 100).toFixed(0)}%</div>
       </div>
     `).join("")
-    : '<div class="empty-msg" style="font-size:0.8rem;">No high-confidence tips compatible with all top 5 scorelines.</div>';
+    : '<div class="empty-msg" style="font-size:0.8rem;">No tips compatible with all top 5 scorelines.</div>';
 
   return `
-    <div class="xg-row">
-      <div class="xg-team-box home">
-        <div class="xg-label">${escapeHtml(p.homeTeam)}</div>
-        <div class="xg-value">${p.xgHome.toFixed(2)}</div>
-      </div>
-      <div class="xg-vs">xG</div>
-      <div class="xg-team-box away">
-        <div class="xg-label">${escapeHtml(p.awayTeam)}</div>
-        <div class="xg-value">${p.xgAway.toFixed(2)}</div>
-      </div>
+    <p class="matrix-hint" style="margin-bottom:12px;">
+      Expected goals: <b>${p.xgHome.toFixed(2)}</b> – <b>${p.xgAway.toFixed(2)}</b>
+    </p>
+
+    <div class="pred-section">
+      <h4>Outcome Probabilities</h4>
+      ${outcomeHtml}
     </div>
 
     <div class="pred-section">
-      <h4>🎯 Top 5 Scorelines</h4>
-      <div class="scores-grid">${scoresHtml}</div>
+      <h4>🏆 Top 5 Most Likely Scorelines</h4>
+      <ul class="top-list">${top5Html}</ul>
     </div>
 
     <div class="pred-section">
-      <h4>📊 Result Probability</h4>
-      ${resultHtml}
-    </div>
-
-    <div class="pred-section">
-      <h4>📋 Score Probability Matrix (%)</h4>
+      <h4>Score Probability Matrix (%)</h4>
+      <p class="matrix-hint">Rows = Home goals, Columns = Away goals. Highlighted = most likely.</p>
       <div class="matrix-wrapper">
         <table class="score-matrix">${matrixHtml}</table>
       </div>
