@@ -5,21 +5,26 @@ const FD_TOKEN = process.env.FOOTBALL_DATA_TOKEN;
 const FD_BASE = "https://api.football-data.org/v4";
 const SA_JSON = process.env.FIREBASE_SERVICE_ACCOUNT;
 
-// Football-data.org competition codes
+// All 12 free-tier competitions from football-data.org
 const LEAGUES = [
-  { code: "PL",  id: 1, name: "Premier League" },
-  { code: "PD",  id: 2, name: "La Liga" },
-  { code: "SA",  id: 3, name: "Serie A" },
-  { code: "BL1", id: 4, name: "Bundesliga" },
-  { code: "FL1", id: 5, name: "Ligue 1" },
-  { code: "DED", id: 6, name: "Eredivisie" },
-  { code: "PPL", id: 7, name: "Primeira Liga" },
-  { code: "CL",  id: 8, name: "Champions League" }
+  { code: "PL",  id: 1,  name: "Premier League" },
+  { code: "PD",  id: 2,  name: "La Liga" },
+  { code: "SA",  id: 3,  name: "Serie A" },
+  { code: "BL1", id: 4,  name: "Bundesliga" },
+  { code: "FL1", id: 5,  name: "Ligue 1" },
+  { code: "DED", id: 6,  name: "Eredivisie" },
+  { code: "PPL", id: 7,  name: "Primeira Liga" },
+  { code: "BSA", id: 8,  name: "Brasileirão Série A" },
+  { code: "ELC", id: 9,  name: "Championship" },
+  { code: "CL",  id: 10, name: "UEFA Champions League" },
+  { code: "EC",  id: 11, name: "European Championship" },
+  { code: "WC",  id: 12, name: "FIFA World Cup" }
 ];
 
 const RHO = -0.13;
 const MAX_GOALS = 9;
 const MODEL_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const API_DELAY_MS = 6500; // respect 10 req/min rate limit
 
 if (!FD_TOKEN) { console.error("Missing FOOTBALL_DATA_TOKEN"); process.exit(1); }
 if (!SA_JSON) { console.error("Missing FIREBASE_SERVICE_ACCOUNT"); process.exit(1); }
@@ -32,7 +37,6 @@ admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 const db = admin.firestore();
 const Timestamp = admin.firestore.Timestamp;
 
-// ---------- API CLIENT ----------
 async function fd(path, params = {}) {
   const qs = new URLSearchParams(params).toString();
   const url = `${FD_BASE}${path}${qs ? "?" + qs : ""}`;
@@ -51,27 +55,37 @@ async function fd(path, params = {}) {
 }
 
 function currentSeasonStart() {
-  // Football-data.org season year = starting year of the season.
-  // Most European leagues start in Aug/Sep.
   const d = new Date();
+  // Northern-hemisphere leagues: season starts in July/August.
+  // Southern-hemisphere (Brasileirão) runs by calendar year.
   return d.getUTCMonth() >= 6 ? d.getUTCFullYear() : d.getUTCFullYear() - 1;
 }
 
-// All matches (finished + scheduled) for a competition in a season
+// Football-data.org: fetch a season's matches for a competition.
+// For calendar-year leagues like BSA, tries both plausible years.
 async function getCompetitionMatches(code, season) {
-  const data = await fd(`/competitions/${code}/matches`, { season });
-  return (data.matches || []).map(m => ({
-    fixtureId: m.id,
-    home: m.homeTeam?.name,
-    away: m.awayTeam?.name,
-    homeGoals: m.score?.fullTime?.home,
-    awayGoals: m.score?.fullTime?.away,
-    status: m.status,
-    utcDate: m.utcDate
-  }));
+  const tries = [season, season + 1, season - 1];
+  for (const s of tries) {
+    try {
+      const data = await fd(`/competitions/${code}/matches`, { season: s });
+      const matches = (data.matches || []).map(m => ({
+        fixtureId: m.id,
+        home: m.homeTeam?.name,
+        away: m.awayTeam?.name,
+        homeGoals: m.score?.fullTime?.home,
+        awayGoals: m.score?.fullTime?.away,
+        status: m.status,
+        utcDate: m.utcDate
+      })).filter(m => m.home && m.away);
+      if (matches.length > 5) return { matches, season: s };
+    } catch (err) {
+      // try next season
+    }
+  }
+  return { matches: [], season };
 }
 
-// ---------- POISSON / DIXON-COLES ----------
+// ---------- POISSON ----------
 function logFactorial(k) { let s = 0; for (let i = 2; i <= k; i++) s += Math.log(i); return s; }
 function poissonPmf(k, l) { if (l <= 0) return k === 0 ? 1 : 0; return Math.exp(-l + k * Math.log(l) - logFactorial(k)); }
 function dixonColesTau(k, h, xh, xa, rho) {
@@ -99,18 +113,18 @@ function topScoreline(m, mg) {
   return b;
 }
 
-// ---------- MODEL FIT ----------
-function fitFromMatches(matches) {
-  if (matches.length < 15) return null;
-  const n = matches.length;
+// ---------- MODEL ----------
+function fitFromMatches(finished) {
+  if (finished.length < 15) return null;
+  const n = finished.length;
   let hg = 0, ag = 0;
-  for (const m of matches) { hg += m.homeGoals; ag += m.awayGoals; }
+  for (const m of finished) { hg += m.homeGoals; ag += m.awayGoals; }
   const avgH = hg / n, avgA = ag / n;
   const sl = x => Math.log(Math.max(x, 1e-9));
   const mu = sl(avgA);
   const muHome = sl(avgH) - sl(avgA);
   const ts = {};
-  for (const m of matches) {
+  for (const m of finished) {
     if (!ts[m.home]) ts[m.home] = { fW: 0, aW: 0, w: 0 };
     if (!ts[m.away]) ts[m.away] = { fW: 0, aW: 0, w: 0 };
     ts[m.home].fW += m.homeGoals; ts[m.home].aW += m.awayGoals; ts[m.home].w += 1;
@@ -118,7 +132,7 @@ function fitFromMatches(matches) {
   }
   const teams = {};
   for (const nm in ts) { const s = ts[nm]; teams[nm] = { att: sl(s.fW / s.w) - mu, def: sl(s.aW / s.w) - mu }; }
-  return { mu, muHome, teams, matchesUsed: matches.length };
+  return { mu, muHome, teams, matchesUsed: n };
 }
 
 function calcXG(model, home, away) {
@@ -147,65 +161,39 @@ function gradePrediction(p, ah, aa) {
   return { outcomeCorrect: oc, scorelineCorrect: sc, brierScore: brier, logLoss: -Math.log(pa), actualOutcome: ao };
 }
 
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
 // ---------- MAIN ----------
 async function main() {
   const start = Date.now();
   console.log("sync.js started at", new Date().toISOString());
-  const season = currentSeasonStart();
-  console.log(`Season: ${season}`);
+  const baseSeason = currentSeasonStart();
+  console.log(`Base season: ${baseSeason}`);
 
   const modelDoc = await db.collection("models").doc("current").get();
   const modelAge = modelDoc.exists ? Date.now() - modelDoc.data().updatedAt.toMillis() : Infinity;
   const modelEmpty = !modelDoc.exists || !modelDoc.data()?.leagues || Object.keys(modelDoc.data().leagues || {}).length === 0;
-  let modelsByLeague;
+  const needsRefit = modelEmpty || modelAge > MODEL_MAX_AGE_MS;
 
-  // Refit model if needed
-  if (modelEmpty || modelAge > MODEL_MAX_AGE_MS) {
-    console.log("Refitting models...");
-    modelsByLeague = {};
-    for (const league of LEAGUES) {
-      try {
-        console.log(`\n${league.name} (${league.code}):`);
-        const matches = await getCompetitionMatches(league.code, season);
-        const finished = matches.filter(m =>
-          m.homeGoals != null && m.awayGoals != null &&
-          ["FINISHED", "AWARDED"].includes(m.status)
-        );
-        console.log(`   ${matches.length} total, ${finished.length} finished`);
-        const model = fitFromMatches(finished);
-        if (model) {
-          modelsByLeague[league.code] = model;
-          console.log(`   OK model from ${finished.length} matches`);
-        } else {
-          console.log(`   Skipped: not enough finished matches`);
-        }
-        await new Promise(r => setTimeout(r, 6500)); // respect 10 req/min
-      } catch (err) {
-        console.error(`   Failed: ${err.message}`);
-      }
-    }
-    await db.collection("models").doc("current").set({
-      leagues: modelsByLeague,
-      season,
-      updatedAt: Timestamp.now(),
-      version: Date.now()
-    });
-    console.log(`\nModels saved: ${Object.keys(modelsByLeague).length} leagues`);
-  } else {
-    console.log(`Model fresh (${Math.round(modelAge / 3600000)}h) — reusing`);
-    modelsByLeague = modelDoc.data().leagues || {};
-  }
+  console.log(`Model refit needed: ${needsRefit ? "yes" : "no (fresh)"}`);
 
-  // Fetch matches per league, split into finished + scheduled
+  const modelsByLeague = {};
+  const seasonsUsed = {};
   let totalPred = 0, totalRes = 0, totalGraded = 0;
 
+  // ONE fetch per league — used for both model fit and predictions
   for (const league of LEAGUES) {
-    const model = modelsByLeague[league.code];
-    if (!model) { console.log(`\n${league.name}: no model, skipping`); continue; }
+    console.log(`\n═══ ${league.name} (${league.code}) ═══`);
 
     try {
-      console.log(`\n${league.name}`);
-      const matches = await getCompetitionMatches(league.code, season);
+      const { matches, season } = await getCompetitionMatches(league.code, baseSeason);
+      if (matches.length === 0) {
+        console.log(`   No data available`);
+        await sleep(API_DELAY_MS);
+        continue;
+      }
+
+      seasonsUsed[league.code] = season;
 
       const finished = matches.filter(m =>
         m.homeGoals != null && m.awayGoals != null &&
@@ -216,10 +204,30 @@ async function main() {
         new Date(m.utcDate) > new Date()
       );
 
-      console.log(`   ${finished.length} finished, ${scheduled.length} scheduled`);
+      console.log(`   ${matches.length} total, ${finished.length} finished, ${scheduled.length} scheduled (season ${season})`);
 
-      // Write predictions for next 10 scheduled matches
-      const upcoming = scheduled.slice(0, 10);
+      // Fit or reuse model
+      let model = !needsRefit ? (modelDoc.data().leagues || {})[league.code] : null;
+      if (!model) {
+        model = fitFromMatches(finished);
+        if (model) {
+          modelsByLeague[league.code] = model;
+          console.log(`   Model fit from ${finished.length} matches`);
+        } else {
+          console.log(`   Not enough finished matches (${finished.length}) for a model`);
+        }
+      } else {
+        modelsByLeague[league.code] = model;
+        console.log(`   Reusing cached model`);
+      }
+
+      if (!model) {
+        await sleep(API_DELAY_MS);
+        continue;
+      }
+
+      // Write predictions
+      const upcoming = scheduled.slice(0, 15);
       if (upcoming.length > 0) {
         const batch = db.batch();
         let n = 0;
@@ -249,11 +257,11 @@ async function main() {
           });
           n++;
         }
-        if (n > 0) { await batch.commit(); totalPred += n; console.log(`   ${n} predictions`); }
+        if (n > 0) { await batch.commit(); totalPred += n; console.log(`   ${n} predictions written`); }
       }
 
-      // Write results for last 10 finished matches
-      const recent = finished.slice(-10);
+      // Write results
+      const recent = finished.slice(-15);
       if (recent.length > 0) {
         const batch = db.batch();
         for (const fx of recent) {
@@ -274,9 +282,11 @@ async function main() {
         }
         await batch.commit();
         totalRes += recent.length;
-        console.log(`   ${recent.length} results`);
+        console.log(`   ${recent.length} results written`);
+      }
 
-        // Grade predictions against these results
+      // Grade matching predictions
+      if (recent.length > 0) {
         const ids = recent.map(f => String(f.fixtureId));
         const chunks = [];
         for (let i = 0; i < ids.length; i += 30) chunks.push(ids.slice(i, i + 30));
@@ -321,17 +331,27 @@ async function main() {
         }
       }
 
-      // Respect rate limit between leagues
-      await new Promise(r => setTimeout(r, 6500));
+      await sleep(API_DELAY_MS);
+
     } catch (err) {
       console.error(`   Failed: ${err.message}`);
+      await sleep(API_DELAY_MS);
     }
   }
+
+  // Save models
+  await db.collection("models").doc("current").set({
+    leagues: modelsByLeague,
+    seasons: seasonsUsed,
+    updatedAt: Timestamp.now(),
+    version: Date.now()
+  });
+  console.log(`\n💾 Models saved: ${Object.keys(modelsByLeague).length} leagues`);
 
   await recomputeAccuracyStats();
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-  console.log(`\nDone in ${elapsed}s — ${totalPred} predictions, ${totalRes} results, ${totalGraded} graded`);
+  console.log(`\n✅ Done in ${elapsed}s — ${totalPred} predictions, ${totalRes} results, ${totalGraded} graded`);
 }
 
 async function recomputeAccuracyStats() {
@@ -371,7 +391,7 @@ async function recomputeAccuracyStats() {
     avgBrierScore: total ? bs / total : 0, avgLogLoss: total ? ll / total : 0,
     byLeague: ls, windowDays: 30, updatedAt: Timestamp.now()
   });
-  console.log(`Accuracy stats updated (${total} graded)`);
+  console.log(`📈 Accuracy stats updated (${total} graded)`);
 }
 
-main().catch(err => { console.error("Fatal:", err); process.exit(1); });
+main().catch(err => { console.error("💥 Fatal:", err); process.exit(1); });
