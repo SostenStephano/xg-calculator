@@ -22,11 +22,16 @@
       Generated automatically every day at 02:00 UTC and stored in Firestore.
       Updates in real time.
     </p>
-    <ul id="autoPredictions" class="top-list">
-      <li style="grid-template-columns:1fr; text-align:center; color:#64748b;">
-        Loading predictions…
-      </li>
-    </ul>
+    <div class="filter-bar">
+      <label for="leagueFilter">Filter by league:</label>
+      <select id="leagueFilter">
+        <option value="">All leagues</option>
+      </select>
+      <span id="predCount" class="badge">—</span>
+    </div>
+    <div id="autoPredictions" class="pred-list">
+      <div class="empty-msg">Loading predictions…</div>
+    </div>
   </div>
 
   <!-- RECENT RESULTS -->
