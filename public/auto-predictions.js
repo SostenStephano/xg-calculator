@@ -1,23 +1,16 @@
 // ============================================================
-// Live listeners for /predictions (next 3 days) and
-// /results (last 3 days) shown on the homepage.
+// Live listeners for predictions and results from Firestore.
 // ============================================================
 
 import {
-  db, collection, query, where, orderBy, onSnapshot
+  db, collection, query, orderBy, limit, onSnapshot
 } from "./firebase-config.js";
 
-// ---------- TODAY + NEXT 3 DAYS PREDICTIONS ----------
-const now = new Date();
-const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-const end = new Date(start);
-end.setDate(end.getDate() + 4);
-
+// ---------- UPCOMING PREDICTIONS (next 20) ----------
 const predQuery = query(
   collection(db, "predictions"),
-  where("kickoff", ">=", start),
-  where("kickoff", "<", end),
-  orderBy("kickoff", "asc")
+  orderBy("kickoff", "asc"),
+  limit(20)
 );
 
 onSnapshot(predQuery, snapshot => {
@@ -26,7 +19,7 @@ onSnapshot(predQuery, snapshot => {
   ul.innerHTML = "";
 
   if (snapshot.empty) {
-    ul.innerHTML = '<li style="grid-template-columns:1fr; text-align:center; color:#64748b;">No predictions for the next 3 days yet.</li>';
+    ul.innerHTML = '<li style="grid-template-columns:1fr; text-align:center; color:#64748b;">No predictions yet. They will appear after the next sync run.</li>';
     return;
   }
 
@@ -62,14 +55,11 @@ onSnapshot(predQuery, snapshot => {
   });
 });
 
-// ---------- LAST 3 DAYS RESULTS ----------
-const from = new Date();
-from.setDate(from.getDate() - 3);
-
+// ---------- RECENT RESULTS (last 20) ----------
 const resQuery = query(
   collection(db, "results"),
-  where("kickoff", ">=", from),
-  orderBy("kickoff", "desc")
+  orderBy("kickoff", "desc"),
+  limit(20)
 );
 
 onSnapshot(resQuery, snapshot => {
@@ -78,7 +68,7 @@ onSnapshot(resQuery, snapshot => {
   ul.innerHTML = "";
 
   if (snapshot.empty) {
-    ul.innerHTML = '<li style="grid-template-columns:1fr; text-align:center; color:#64748b;">No results from the last 3 days.</li>';
+    ul.innerHTML = '<li style="grid-template-columns:1fr; text-align:center; color:#64748b;">No results yet.</li>';
     return;
   }
 
@@ -96,7 +86,7 @@ onSnapshot(resQuery, snapshot => {
       <span class="rank">${dateStr}</span>
       <span class="scoreline">
         ${r.homeTeam} ${r.homeGoals} – ${r.awayGoals} ${r.awayTeam}
-        <span class="team">${r.leagueName} · ${r.status}</span>
+        <span class="team">${r.leagueName}</span>
       </span>
       <span class="prob">${outcome}</span>
     `;
