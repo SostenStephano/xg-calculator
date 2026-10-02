@@ -303,14 +303,14 @@ async function main() {
         console.log(`   Backtest: ${train.length} train / ${test.length} test`);
 
         // Approach 1: current season only
-        backtestCurrent = backtestApproach(train, {});
+        backtestCurrent = backtestApproach(train, test, {});
 
         // Approach 2: blended — prev season gets 30% weight
         if (finishedPrev.length > 0) {
           const prevWeight = 0.3;
           const blendedTrain = [...finishedPrev, ...train];
           const prevSeasonDates = new Set(finishedPrev.map(m => m.fixtureId));
-          backtestBlended = backtestApproach(blendedTrain, {
+          backtestBlended = backtestApproach(blendedTrain, test, {
             weightBySeasonFn: (m) => prevSeasonDates.has(m.fixtureId) ? prevWeight : 1.0
           });
         }
