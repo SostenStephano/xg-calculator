@@ -153,14 +153,15 @@ function predictOutcome(model, home, away) {
 
 
 
-// Draw-aware decision rule (draws are underweighted by ~25% in Poisson models)
-const DRAW_BOOST = 1.30;
-function decideOutcome(pred) {
-  if (pred.pD * DRAW_BOOST > pred.pH && pred.pD * DRAW_BOOST > pred.pA) return "D";
-  if (pred.pH >= pred.pA) return "H";
-  return "A";
-}
 
+// Draw-aware decision rule: if the draw probability is within 15% of the top
+// outcome, pick Draw. Real draw rate is ~25-27%; Poisson models underweight it.
+const DRAW_THRESHOLD = 0.15;
+function decideOutcome(pred) {
+  const top = Math.max(pred.pH, pred.pA);
+  if (pred.pD + DRAW_THRESHOLD >= top) return "D";
+  return pred.pH >= pred.pA ? "H" : "A";
+}
 function outcomeOf(h, a) { return h > a ? "H" : h < a ? "A" : "D"; }
 
 // ============================================================
