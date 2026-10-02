@@ -151,6 +151,16 @@ function predictOutcome(model, home, away) {
   return { xgHome, xgAway, pH: o.pHome, pD: o.pDraw, pA: o.pAway, topScoreline: `${top.k}-${top.h}`, topScorelineProb: top.p };
 }
 
+
+
+// Draw-aware decision rule (draws are underweighted by ~25% in Poisson models)
+const DRAW_BOOST = 1.30;
+function decideOutcome(pred) {
+  if (pred.pD * DRAW_BOOST > pred.pH && pred.pD * DRAW_BOOST > pred.pA) return "D";
+  if (pred.pH >= pred.pA) return "H";
+  return "A";
+}
+
 function outcomeOf(h, a) { return h > a ? "H" : h < a ? "A" : "D"; }
 
 // ============================================================
@@ -182,7 +192,7 @@ function fullBacktest(currentSeasonFinished, prevSeasonFinished) {
     if (modelCur) {
       const pred = predictOutcome(modelCur, testMatch.home, testMatch.away);
       if (pred) {
-        const po = pred.pH >= pred.pD && pred.pH >= pred.pA ? "H" : pred.pA >= pred.pD ? "A" : "D";
+        const po = decideOutcome(pred);
         const oc = po === actual;
         const sc = pred.topScoreline === actualScore;
         stats.current.total++;
@@ -201,7 +211,7 @@ function fullBacktest(currentSeasonFinished, prevSeasonFinished) {
       if (modelBl) {
         const pred = predictOutcome(modelBl, testMatch.home, testMatch.away);
         if (pred) {
-          const po = pred.pH >= pred.pD && pred.pH >= pred.pA ? "H" : pred.pA >= pred.pD ? "A" : "D";
+          const po = decideOutcome(pred);
           const oc = po === actual;
           const sc = pred.topScoreline === actualScore;
           stats.blended.total++;
@@ -404,7 +414,7 @@ async function main() {
             const fx = recent.find(f => f.fixtureId === p.fixtureId);
             if (!fx) return;
             const ao = outcomeOf(fx.homeGoals, fx.awayGoals);
-            const po = p.probHome >= p.probDraw && p.probHome >= p.probAway ? "H" : p.probAway >= p.probDraw ? "A" : "D";
+            const po = decideOutcome({ pH: p.probHome, pD: p.probDraw, pA: p.probAway });
             const oc = po === ao;
             const sc = p.topScoreline === `${fx.homeGoals}-${fx.awayGoals}`;
             const av = [ao === "H" ? 1 : 0, ao === "D" ? 1 : 0, ao === "A" ? 1 : 0];
