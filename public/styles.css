@@ -674,3 +674,162 @@ tr.qualify { background: #0c2a3d; }
   color: #94a3b8;
   font-size: 0.78rem;
 }
+
+/* ═══════════ ACCUMULATOR v2 — Bet-slip style ═══════════ */
+.acc-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 16px 0;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.acc-tab {
+  background: #1e293b;
+  color: #94a3b8;
+  border: 1px solid #334155;
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+.acc-tab:hover { background: #334155; color: #e2e8f0; }
+.acc-tab.active {
+  background: #38bdf8;
+  color: #0f172a;
+  border-color: #38bdf8;
+}
+
+.acc-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  margin: 16px 0;
+}
+.acc-stat {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 10px;
+  text-align: center;
+}
+.acc-stat-label {
+  font-size: 0.68rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+.acc-stat-value {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: #38bdf8;
+  font-family: 'Courier New', monospace;
+}
+
+.acc-legs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.acc-leg {
+  display: grid;
+  grid-template-columns: 36px 1fr 32px;
+  gap: 10px;
+  align-items: center;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.acc-leg-num {
+  width: 30px;
+  height: 30px;
+  background: #38bdf8;
+  color: #0f172a;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 0.9rem;
+  font-family: 'Courier New', monospace;
+}
+
+.acc-leg-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.acc-leg-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: #e2e8f0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.acc-leg-icon {
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.acc-leg-match {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.acc-leg-detail {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.72rem;
+}
+
+.acc-leg-market {
+  color: #94a3b8;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.acc-leg-odds {
+  font-family: 'Courier New', monospace;
+  font-weight: 800;
+  color: #6ee7b7;
+  font-size: 0.82rem;
+  flex-shrink: 0;
+}
+
+.acc-leg-remove {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: #64748b;
+  font-size: 1.1rem;
+  cursor: pointer;
+  border-radius: 50%;
+  transition: all 0.15s;
+}
+.acc-leg-remove:hover {
+  background: #7f1d1d;
+  color: #fca5a5;
+}

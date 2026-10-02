@@ -57,18 +57,39 @@
 
   <!-- ACCUMULATOR PAGE -->
   <section id="page-accumulator" class="page hidden">
-    <h1>🎯 Daily Accumulator</h1>
-    <p class="subtitle">Auto-built from the safest picks across today\u0027s fixtures. Different leagues for diversity.</p>
+    <h1 id="accTitle">All Accumulator</h1>
+    <p class="subtitle">Auto-built from today\u0027s safest picks. One selection per league for diversity.</p>
+
+    <div class="acc-tabs">
+      <button class="acc-tab active" data-market="all">All</button>
+      <button class="acc-tab" data-market="1X2">1X2</button>
+      <button class="acc-tab" data-market="dc">Double Chance</button>
+      <button class="acc-tab" data-market="ou">Over/Under</button>
+      <button class="acc-tab" data-market="btts">BTTS</button>
+    </div>
+
     <div class="filter-bar">
-      <label for="accLegs">Legs:</label>
-      <select id="accLegs"><option value="3">3</option><option value="4" selected>4</option><option value="5">5</option><option value="6">6</option></select>
+      <label for="accLegs">Selections:</label>
+      <select id="accLegs">
+        <option value="3">3</option>
+        <option value="4">4</option>
+        <option value="5">5</option>
+        <option value="6" selected>6</option>
+      </select>
       <label for="accMinProb" style="margin-left:12px;">Min prob:</label>
-      <select id="accMinProb"><option value="0.60">60%</option><option value="0.65">65%</option><option value="0.70" selected>70%</option><option value="0.75">75%</option><option value="0.80">80%</option></select>
+      <select id="accMinProb">
+        <option value="0.55">55%</option>
+        <option value="0.60">60%</option>
+        <option value="0.65" selected>65%</option>
+        <option value="0.70">70%</option>
+        <option value="0.75">75%</option>
+      </select>
       <button id="accRefresh" style="margin-left:auto;">🔄 Rebuild</button>
     </div>
+
     <div id="accumulatorSummary" class="acc-summary"></div>
     <div id="accumulatorLegs" class="acc-legs"></div>
-    <div id="accumulatorEmpty" class="empty-msg hidden">No qualifying picks today. Try lowering the min probability or adding more leagues.</div>
+    <div id="accumulatorEmpty" class="empty-msg hidden">No qualifying picks today.</div>
   </section>
 
   <!-- ══════════════ RESULTS PAGE ══════════════ -->
