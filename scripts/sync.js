@@ -20,13 +20,14 @@ const LEAGUES = [
   { code: "WC",  id: 12, name: "FIFA World Cup" }
 ];
 
-// ---- Model hyperparameters ----
-const RHO = -0.13;              // Dixon-Coles correction
+const RHO = -0.13;
 const MAX_GOALS = 9;
-const XI = 0.0035;              // time-decay rate per match (higher = faster decay)
-const SHRINK_K = 8;             // shrinkage constant (higher = more regression to mean)
 const MODEL_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const API_DELAY_MS = 6500;
+
+// Backtest config
+const BACKTEST_MATCHES_PER_TEAM = 2;   // last N matches per team used for testing
+const BACKTEST_MIN_MATCHES = 30;       // need at least this many matches to backtest
 
 if (!FD_TOKEN) { console.error("Missing FOOTBALL_DATA_TOKEN"); process.exit(1); }
 if (!SA_JSON) { console.error("Missing FIREBASE_SERVICE_ACCOUNT"); process.exit(1); }
@@ -35,11 +36,11 @@ let serviceAccount;
 try { serviceAccount = JSON.parse(SA_JSON); }
 catch (e) { serviceAccount = JSON.parse(Buffer.from(SA_JSON, "base64").toString("utf8")); }
 
-admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+admin.initializeApp({ credential: admin.credential.createCredential ? admin.credential.cert(serviceAccount) : admin.credential.cert(serviceAccount) });
 const db = admin.firestore();
 const Timestamp = admin.firestore.Timestamp;
 
-// ---------- API CLIENT ----------
+// ---------- API ----------
 async function fd(path, params = {}) {
   const qs = new URLSearchParams(params).toString();
   const url = `${FD_BASE}${path}${qs ? "?" + qs : ""}`;
@@ -80,7 +81,7 @@ async function getCompetitionMatches(code, season) {
   return { matches: [], season };
 }
 
-// ---------- POISSON / DIXON-COLES ----------
+// ---------- MATH ----------
 function logFactorial(k) { let s = 0; for (let i = 2; i <= k; i++) s += Math.log(i); return s; }
 function poissonPmf(k, l) { if (l <= 0) return k === 0 ? 1 : 0; return Math.exp(-l + k * Math.log(l) - logFactorial(k)); }
 function dixonColesTau(k, h, xh, xa, rho) {
@@ -109,19 +110,22 @@ function topScorelines(m, mg, n) {
   return all.slice(0, n);
 }
 
-// ---------- IMPROVED MODEL FIT (time-weighted + shrunk) ----------
-// matches must be sorted oldest → newest (index 0 = oldest)
-function fitFromMatches(finished) {
-  if (finished.length < 15) return null;
+function fitFromMatches(matches, opts = {}) {
+  // matches = array of { home, away, homeGoals, awayGoals, utcDate }
+  // opts.weightFn = (match, i, total) => number (default 1)
+  // opts.weightBySeasonFn = (match) => number (used for blend)
+  if (matches.length < 15) return null;
 
-  // Sort chronologically ascending
-  const sorted = [...finished].sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
+  const sorted = [...matches].sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
   const n = sorted.length;
 
-  // ---- Time weights: most recent = weight 1; each step back decays by e^(-XI) ----
-  const weights = sorted.map((_, i) => Math.exp(-XI * (n - 1 - i)));
+  const weights = sorted.map((m, i) => {
+    let w = 1;
+    if (opts.weightFn) w *= opts.weightFn(m, i, n);
+    if (opts.weightBySeasonFn) w *= opts.weightBySeasonFn(m);
+    return w;
+  });
 
-  // ---- Weighted averages ----
   let wSum = 0, wHome = 0, wAway = 0;
   for (let i = 0; i < n; i++) {
     wSum += weights[i];
@@ -135,7 +139,6 @@ function fitFromMatches(finished) {
   const mu = sl(avgA);
   const muHome = sl(avgH) - sl(avgA);
 
-  // ---- Weighted team stats ----
   const ts = {};
   for (let i = 0; i < n; i++) {
     const m = sorted[i], w = weights[i];
@@ -149,95 +152,118 @@ function fitFromMatches(finished) {
     ts[m.away].w += w;
   }
 
-  // ---- Shrink toward league mean ----
-  // effective matches = sum of weights (not raw count), so small-sample teams
-  // get pulled strongly toward att=0, def=0.
   const teams = {};
   for (const nm in ts) {
     const s = ts[nm];
-    const rawAtt = sl(s.fW / s.w) - mu;
-    const rawDef = sl(s.aW / s.w) - mu;
-
-    // Shrinkage factor: effective_weights / (effective_weights + K)
-    const eff = s.w;
-    const shrink = eff / (eff + SHRINK_K);
-
     teams[nm] = {
-      att: shrink * rawAtt,
-      def: shrink * rawDef,
-      matches: Math.round(eff),
-      rawAtt, rawDef, shrink
+      att: sl(s.fW / s.w) - mu,
+      def: sl(s.aW / s.w) - mu,
+      matches: Math.round(s.w)
     };
   }
-
-  return { mu, muHome, teams, matchesUsed: n, shrink: SHRINK_K, xi: XI };
+  return { mu, muHome, teams, matchesUsed: n };
 }
 
-function calcXG(model, home, away) {
+function predictOutcome(model, home, away) {
   const h = model.teams[home], a = model.teams[away];
   if (!h || !a) return null;
+  const xgHome = Math.exp(model.mu) * Math.exp(model.muHome) * Math.exp(h.att) * Math.exp(a.def);
+  const xgAway = Math.exp(model.mu) * Math.exp(a.att) * Math.exp(h.def);
+  const matrix = buildScoreMatrix(xgHome, xgAway, MAX_GOALS, true, RHO);
+  const o = outcomesFromMatrix(matrix, MAX_GOALS);
+  const top = topScorelines(matrix, MAX_GOALS, 1)[0];
   return {
-    xgHome: Math.exp(model.mu) * Math.exp(model.muHome) * Math.exp(h.att) * Math.exp(a.def),
-    xgAway: Math.exp(model.mu) * Math.exp(a.att) * Math.exp(h.def)
+    xgHome, xgAway,
+    pH: o.pHome, pD: o.pDraw, pA: o.pAway,
+    topScoreline: `${top.k}-${top.h}`,
+    topScorelineProb: top.p
   };
 }
 
-// ---------- CONFIDENCE SCORING ----------
-// Uses Shannon entropy of the outcome distribution + top-scoreline concentration.
-// Returns one of: "high", "medium", "low" + a numeric 0-100 score.
-function confidenceScore(stats, top5) {
-  // Entropy of the 1X2 distribution
-  const probs = [stats.pHome, stats.pDraw, stats.pAway].filter(p => p > 1e-9);
-  const entropy = -probs.reduce((s, p) => s + p * Math.log2(p), 0);
-  // Max entropy for 3 outcomes is log2(3) ≈ 1.585 — normalize to 0–1 where 0 = certain, 1 = uniform
-  const normalized = entropy / Math.log2(3);
-
-  // Top-scoreline concentration: how much probability is in the single best scoreline
-  const top1 = top5[0]?.p || 0;
-
-  // Confidence = how far from uniform the outcome distribution is, boosted by top-scoreline mass
-  const outcomeConf = (1 - normalized);          // 0–1, higher = more confident
-  const scoreConf = Math.min(top1 / 0.20, 1);    // 20% top-scoreline mass = full confidence
-
-  const score = Math.round((outcomeConf * 0.6 + scoreConf * 0.4) * 100);
-  let level = "low";
-  if (score >= 65) level = "high";
-  else if (score >= 45) level = "medium";
-  return { score, level };
-}
-
-// ---------- GRADING ----------
 function outcomeOf(h, a) { return h > a ? "H" : h < a ? "A" : "D"; }
-function gradePrediction(p, ah, aa) {
-  const ao = outcomeOf(ah, aa);
-  const asc = `${ah}-${aa}`;
-  const po = p.probHome >= p.probDraw && p.probHome >= p.probAway ? "H" : p.probAway >= p.probDraw ? "A" : "D";
-  const oc = po === ao;
-  const sc = p.topScoreline === asc;
-  const av = [ao === "H" ? 1 : 0, ao === "D" ? 1 : 0, ao === "A" ? 1 : 0];
-  const pv = [p.probHome, p.probDraw, p.probAway];
-  let brier = 0;
-  for (let i = 0; i < 3; i++) brier += Math.pow(pv[i] - av[i], 2);
-  brier /= 3;
-  const pa = Math.max(ao === "H" ? p.probHome : ao === "D" ? p.probDraw : p.probAway, 1e-15);
-  return { outcomeCorrect: oc, scorelineCorrect: sc, brierScore: brier, logLoss: -Math.log(pa), actualOutcome: ao };
+
+// ---------- BACKTEST ----------
+// Test set = union of each team's last N finished matches
+// Train set = everything else
+function buildTrainTest(finished, matchesPerTeam = 2) {
+  const byTeam = {};
+  const sorted = [...finished].sort((a, b) => new Date(b.utcDate) - new Date(a.utcDate)); // newest first
+
+  for (const m of sorted) {
+    if (!byTeam[m.home]) byTeam[m.home] = [];
+    if (!byTeam[m.away]) byTeam[m.away] = [];
+    byTeam[m.home].push(m);
+    byTeam[m.away].push(m);
+  }
+
+  const testIds = new Set();
+  for (const team in byTeam) {
+    byTeam[team].slice(0, matchesPerTeam).forEach(m => testIds.add(m.fixtureId));
+  }
+
+  const test = finished.filter(m => testIds.has(m.fixtureId));
+  const train = finished.filter(m => !testIds.has(m.fixtureId));
+  return { train, test };
 }
 
-const sleep = ms => new Promise(r => setTimeout(r, ms));
+function backtestApproach(train, test, opts = {}) {
+  const model = fitFromMatches(train, opts);
+  if (!model) return null;
+
+  let correct = 0, scoreCorrect = 0, total = 0;
+  const details = [];
+
+  for (const match of test) {
+    const pred = predictOutcome(model, match.home, match.away);
+    if (!pred) continue;
+
+    const actual = outcomeOf(match.homeGoals, match.awayGoals);
+    const predicted = pred.pH >= pred.pD && pred.pH >= pred.pA ? "H" : pred.pA >= pred.pD ? "A" : "D";
+    const actualScore = `${match.homeGoals}-${match.awayGoals}`;
+    const isOutcomeCorrect = actual === predicted;
+    const isScoreCorrect = pred.topScoreline === actualScore;
+
+    if (isOutcomeCorrect) correct++;
+    if (isScoreCorrect) scoreCorrect++;
+    total++;
+
+    details.push({
+      home: match.home,
+      away: match.away,
+      date: match.utcDate,
+      actualScore,
+      predictedScore: pred.topScoreline,
+      actualOutcome: actual,
+      predictedOutcome: predicted,
+      outcomeCorrect: isOutcomeCorrect,
+      scoreCorrect: isScoreCorrect
+    });
+  }
+
+  return {
+    total,
+    correct,
+    scoreCorrect,
+    outcomeAccuracy: total ? correct / total : 0,
+    scoreAccuracy: total ? scoreCorrect / total : 0,
+    details
+  };
+}
 
 // ---------- MAIN ----------
 async function main() {
   const start = Date.now();
   console.log("sync.js started at", new Date().toISOString());
   const baseSeason = currentSeasonStart();
-  console.log(`Base season: ${baseSeason} | xi=${XI} | rho=${RHO} | shrinkK=${SHRINK_K}`);
+  console.log(`Base season: ${baseSeason}`);
 
   const modelDoc = await db.collection("models").doc("current").get();
+  const forcedApproach = modelDoc.exists ? modelDoc.data().forcedApproach : null;
   const modelAge = modelDoc.exists ? Date.now() - modelDoc.data().updatedAt.toMillis() : Infinity;
   const modelEmpty = !modelDoc.exists || !modelDoc.data()?.leagues || Object.keys(modelDoc.data().leagues || {}).length === 0;
   const needsRefit = modelEmpty || modelAge > MODEL_MAX_AGE_MS;
 
-  console.log(`Refit needed: ${needsRefit ? "yes" : "no (fresh)"}`);
+  console.log(`Refit: ${needsRefit ? "yes" : "no"} | Forced approach: ${forcedApproach || "auto"}`);
 
   const modelsByLeague = {};
   const seasonsUsed = {};
@@ -246,59 +272,127 @@ async function main() {
   for (const league of LEAGUES) {
     console.log(`\n═══ ${league.name} (${league.code}) ═══`);
     try {
-      const { matches, season } = await getCompetitionMatches(league.code, baseSeason);
-      if (matches.length === 0) { console.log("   No data"); await sleep(API_DELAY_MS); continue; }
-      seasonsUsed[league.code] = season;
+      const { matches: currentMatches } = await getCompetitionMatches(league.code, baseSeason);
+      if (currentMatches.length === 0) { console.log("   No data"); await sleep(API_DELAY_MS); continue; }
 
-      const finished = matches.filter(m =>
+      const finishedCurrent = currentMatches.filter(m =>
         m.homeGoals != null && m.awayGoals != null &&
         ["FINISHED", "AWARDED"].includes(m.status)
       );
-      const scheduled = matches.filter(m =>
+      const scheduled = currentMatches.filter(m =>
         ["SCHEDULED", "TIMED"].includes(m.status) && new Date(m.utcDate) > new Date()
       );
 
-      console.log(`   ${matches.length} total, ${finished.length} finished, ${scheduled.length} upcoming`);
+      console.log(`   ${finishedCurrent.length} finished, ${scheduled.length} upcoming`);
 
-      let model = !needsRefit ? (modelDoc.data().leagues || {})[league.code] : null;
-      if (!model) {
-        model = fitFromMatches(finished);
-        if (model) {
-          modelsByLeague[league.code] = model;
-          console.log(`   Model fitted from ${finished.length} matches`);
+      // Fetch previous season for blended (only if needed)
+      let finishedPrev = [];
+      if (finishedCurrent.length >= BACKTEST_MIN_MATCHES) {
+        const { matches: prevMatches } = await getCompetitionMatches(league.code, baseSeason - 1);
+        finishedPrev = prevMatches.filter(m =>
+          m.homeGoals != null && m.awayGoals != null &&
+          ["FINISHED", "AWARDED"].includes(m.status)
+        );
+        console.log(`   ${finishedPrev.length} previous season matches fetched`);
+      }
+
+      // ---- BACKTEST ----
+      let backtestCurrent = null, backtestBlended = null;
+      if (finishedCurrent.length >= BACKTEST_MIN_MATCHES) {
+        const { train, test } = buildTrainTest(finishedCurrent, BACKTEST_MATCHES_PER_TEAM);
+        console.log(`   Backtest: ${train.length} train / ${test.length} test`);
+
+        // Approach 1: current season only
+        backtestCurrent = backtestApproach(train, {});
+
+        // Approach 2: blended — prev season gets 30% weight
+        if (finishedPrev.length > 0) {
+          const prevWeight = 0.3;
+          const blendedTrain = [...finishedPrev, ...train];
+          const prevSeasonDates = new Set(finishedPrev.map(m => m.fixtureId));
+          backtestBlended = backtestApproach(blendedTrain, {
+            weightBySeasonFn: (m) => prevSeasonDates.has(m.fixtureId) ? prevWeight : 1.0
+          });
+        }
+
+        // Determine winner
+        let winner = "current";
+        if (backtestBlended && backtestBlended.outcomeAccuracy > backtestCurrent.outcomeAccuracy) {
+          winner = "blended";
+        }
+        if (forcedApproach) winner = forcedApproach;
+
+        console.log(`   Backtest → Current: ${(backtestCurrent.outcomeAccuracy * 100).toFixed(1)}% (${backtestCurrent.correct}/${backtestCurrent.total})`);
+        if (backtestBlended) console.log(`   Backtest → Blended: ${(backtestBlended.outcomeAccuracy * 100).toFixed(1)}% (${backtestBlended.correct}/${backtestBlended.total})`);
+        console.log(`   Winner: ${winner}${forcedApproach ? " (forced)" : ""}`);
+
+        // Store backtest results
+        await db.collection("backtests").doc(league.code).set({
+          leagueCode: league.code,
+          leagueName: league.name,
+          season: baseSeason,
+          testSize: test.length,
+          current: backtestCurrent ? {
+            total: backtestCurrent.total,
+            correct: backtestCurrent.correct,
+            scoreCorrect: backtestCurrent.scoreCorrect,
+            outcomeAccuracy: backtestCurrent.outcomeAccuracy,
+            scoreAccuracy: backtestCurrent.scoreAccuracy
+          } : null,
+          blended: backtestBlended ? {
+            total: backtestBlended.total,
+            correct: backtestBlended.correct,
+            scoreCorrect: backtestBlended.scoreCorrect,
+            outcomeAccuracy: backtestBlended.outcomeAccuracy,
+            scoreAccuracy: backtestBlended.scoreAccuracy
+          } : null,
+          winner,
+          forced: !!forcedApproach,
+          sampleDetails: {
+            current: backtestCurrent ? backtestCurrent.details.slice(0, 5) : [],
+            blended: backtestBlended ? backtestBlended.details.slice(0, 5) : []
+          },
+          updatedAt: Timestamp.now()
+        });
+
+        // ---- Fit final model using winning approach on ALL current season data ----
+        if (winner === "blended" && finishedPrev.length > 0) {
+          const prevSeasonIds = new Set(finishedPrev.map(m => m.fixtureId));
+          modelsByLeague[league.code] = fitFromMatches(
+            [...finishedPrev, ...finishedCurrent],
+            { weightBySeasonFn: (m) => prevSeasonIds.has(m.fixtureId) ? 0.3 : 1.0 }
+          );
         } else {
-          console.log(`   Not enough finished (${finished.length})`);
+          modelsByLeague[league.code] = fitFromMatches(finishedCurrent, {});
         }
       } else {
-        modelsByLeague[league.code] = model;
-        console.log(`   Reusing cached model`);
+        // Not enough data for backtest — use current season only, simple fit
+        modelsByLeague[league.code] = fitFromMatches(finishedCurrent, {});
+        console.log(`   Skipping backtest (need ${BACKTEST_MIN_MATCHES} matches)`);
       }
-      if (!model) { await sleep(API_DELAY_MS); continue; }
 
-      // Predictions
+      const model = modelsByLeague[league.code];
+      if (!model) { console.log(`   Could not fit model`); await sleep(API_DELAY_MS); continue; }
+      seasonsUsed[league.code] = baseSeason;
+
+      // ---- Predictions ----
       const upcoming = scheduled.slice(0, 15);
       if (upcoming.length > 0) {
         const batch = db.batch();
         let n = 0;
         for (const fx of upcoming) {
-          const xg = calcXG(model, fx.home, fx.away);
-          if (!xg) continue;
-          const matrix = buildScoreMatrix(xg.xgHome, xg.xgAway, MAX_GOALS, true, RHO);
-          const o = outcomesFromMatrix(matrix, MAX_GOALS);
-          const top5 = topScorelines(matrix, MAX_GOALS, 5);
-          const conf = confidenceScore(o, top5);
+          const pred = predictOutcome(model, fx.home, fx.away);
+          if (!pred) continue;
           const ref = db.collection("predictions").doc(String(fx.fixtureId));
           batch.set(ref, {
             fixtureId: fx.fixtureId,
             homeTeam: fx.home, awayTeam: fx.away,
             leagueId: league.id, leagueCode: league.code, leagueName: league.name,
             kickoff: Timestamp.fromDate(new Date(fx.utcDate)),
-            xgHome: xg.xgHome, xgAway: xg.xgAway,
-            probHome: o.pHome, probDraw: o.pDraw, probAway: o.pAway,
-            topScoreline: `${top5[0].k}-${top5[0].h}`,
-            topScorelineProb: top5[0].p,
-            confidence: conf.score,
-            confidenceLevel: conf.level,
+            xgHome: pred.xgHome, xgAway: pred.xgAway,
+            probHome: pred.pH, probDraw: pred.pD, probAway: pred.pA,
+            topScoreline: pred.topScoreline,
+            topScorelineProb: pred.topScorelineProb,
             generatedAt: Timestamp.now()
           });
           n++;
@@ -306,8 +400,8 @@ async function main() {
         if (n > 0) { await batch.commit(); totalPred += n; console.log(`   ${n} predictions`); }
       }
 
-      // Results
-      const recent = finished.slice(-15);
+      // ---- Results ----
+      const recent = finishedCurrent.slice(-15);
       if (recent.length > 0) {
         const batch = db.batch();
         for (const fx of recent) {
@@ -337,14 +431,24 @@ async function main() {
             const p = ds.data();
             const fx = recent.find(f => f.fixtureId === p.fixtureId);
             if (!fx) return;
-            const g = gradePrediction(p, fx.homeGoals, fx.awayGoals);
+            const ao = outcomeOf(fx.homeGoals, fx.awayGoals);
+            const po = p.probHome >= p.probDraw && p.probHome >= p.probAway ? "H" : p.probAway >= p.probDraw ? "A" : "D";
+            const oc = po === ao;
+            const sc = p.topScoreline === `${fx.homeGoals}-${fx.awayGoals}`;
+            const av = [ao === "H" ? 1 : 0, ao === "D" ? 1 : 0, ao === "A" ? 1 : 0];
+            const pv = [p.probHome, p.probDraw, p.probAway];
+            let brier = 0;
+            for (let i = 0; i < 3; i++) brier += Math.pow(pv[i] - av[i], 2);
+            brier /= 3;
+            const pa = Math.max(ao === "H" ? p.probHome : ao === "D" ? p.probDraw : p.probAway, 1e-15);
+            const logLoss = -Math.log(pa);
+
             const ref = db.collection("accuracy").doc(String(p.fixtureId));
             gb.set(ref, {
               fixtureId: p.fixtureId,
               homeTeam: p.homeTeam, awayTeam: p.awayTeam,
               leagueId: p.leagueId, leagueName: p.leagueName,
               kickoff: p.kickoff,
-              confidence: p.confidence, confidenceLevel: p.confidenceLevel,
               predicted: {
                 xgHome: p.xgHome, xgAway: p.xgAway,
                 probHome: p.probHome, probDraw: p.probDraw, probAway: p.probAway,
@@ -352,12 +456,12 @@ async function main() {
               },
               actual: {
                 homeGoals: fx.homeGoals, awayGoals: fx.awayGoals,
-                outcome: g.actualOutcome,
+                outcome: ao,
                 scoreline: `${fx.homeGoals}-${fx.awayGoals}`
               },
               graded: {
-                outcomeCorrect: g.outcomeCorrect, scorelineCorrect: g.scorelineCorrect,
-                brierScore: g.brierScore, logLoss: g.logLoss
+                outcomeCorrect: oc, scorelineCorrect: sc,
+                brierScore: brier, logLoss
               },
               gradedAt: Timestamp.now()
             });
@@ -376,7 +480,7 @@ async function main() {
 
   await db.collection("models").doc("current").set({
     leagues: modelsByLeague, seasons: seasonsUsed,
-    hyperparams: { xi: XI, rho: RHO, shrinkK: SHRINK_K, maxGoals: MAX_GOALS },
+    forcedApproach: forcedApproach || null,
     updatedAt: Timestamp.now(), version: Date.now()
   });
   console.log(`\n💾 Models saved: ${Object.keys(modelsByLeague).length} leagues`);
@@ -392,16 +496,13 @@ async function recomputeAccuracyStats() {
   cutoff.setDate(cutoff.getDate() - 30);
   const snap = await db.collection("accuracy").where("gradedAt", ">=", Timestamp.fromDate(cutoff)).get();
   const byLeague = {};
-  const byConfidence = { high: { n: 0, ok: 0, sc: 0 }, medium: { n: 0, ok: 0, sc: 0 }, low: { n: 0, ok: 0, sc: 0 } };
   let total = 0, oc = 0, sc = 0, bs = 0, ll = 0;
-
   snap.forEach(ds => {
     const d = ds.data(); const g = d.graded;
     total++;
     if (g.outcomeCorrect) oc++;
     if (g.scorelineCorrect) sc++;
     bs += g.brierScore; ll += g.logLoss;
-
     const key = String(d.leagueId);
     if (!byLeague[key]) byLeague[key] = { leagueId: d.leagueId, leagueName: d.leagueName, total: 0, oc: 0, sc: 0, bs: 0, ll: 0 };
     const l = byLeague[key];
@@ -409,15 +510,7 @@ async function recomputeAccuracyStats() {
     if (g.outcomeCorrect) l.oc++;
     if (g.scorelineCorrect) l.sc++;
     l.bs += g.brierScore; l.ll += g.logLoss;
-
-    const lvl = d.confidenceLevel || "low";
-    if (byConfidence[lvl]) {
-      byConfidence[lvl].n++;
-      if (g.outcomeCorrect) byConfidence[lvl].ok++;
-      if (g.scorelineCorrect) byConfidence[lvl].sc++;
-    }
   });
-
   const ls = {};
   for (const k in byLeague) {
     const l = byLeague[k];
@@ -429,30 +522,17 @@ async function recomputeAccuracyStats() {
       avgLogLoss: l.total ? l.ll / l.total : 0
     };
   }
-
-  const confStats = {};
-  for (const lvl in byConfidence) {
-    const c = byConfidence[lvl];
-    confStats[lvl] = {
-      count: c.n,
-      outcomeAccuracy: c.n ? c.ok / c.n : 0,
-      scorelineAccuracy: c.n ? c.sc / c.n : 0
-    };
-  }
-
   await db.collection("accuracyStats").doc("rolling30d").set({
-    totalPredictions: total,
-    outcomeCorrect: oc, scorelineCorrect: sc,
+    totalPredictions: total, outcomeCorrect: oc, scorelineCorrect: sc,
     outcomeAccuracy: total ? oc / total : 0,
     scorelineAccuracy: total ? sc / total : 0,
     avgBrierScore: total ? bs / total : 0,
     avgLogLoss: total ? ll / total : 0,
-    byLeague: ls,
-    byConfidence: confStats,
-    windowDays: 30,
-    updatedAt: Timestamp.now()
+    byLeague: ls, windowDays: 30, updatedAt: Timestamp.now()
   });
   console.log(`📈 Accuracy updated (${total} graded)`);
 }
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 main().catch(err => { console.error("💥 Fatal:", err); process.exit(1); });
