@@ -9,6 +9,7 @@
 <script type="module" src="firebase-config.js"></script>
 <script type="module" src="lib.js"></script>
 <script type="module" src="app.js"></script>
+<script type="module" src="accumulator.js"></script>
 <script type="module" src="results.js"></script>
 <script type="module" src="accuracy.js"></script>
 </head>
@@ -22,6 +23,7 @@
     </button>
     <ul class="nav-links" id="navLinks">
       <li><a href="#fixtures" data-page="fixtures">Fixtures</a></li>
+      <li><a href="#accumulator" data-page="accumulator">Accumulator</a></li>
       <li><a href="#results" data-page="results">Results</a></li>
       <li><a href="#accuracy" data-page="accuracy">Accuracy</a></li>
       <li><a href="#custom" data-page="custom">Custom</a></li>
@@ -51,6 +53,22 @@
     <div id="fixturesList" class="fixtures-list">
       <div class="empty-msg">Loading fixtures…</div>
     </div>
+  </section>
+
+  <!-- ACCUMULATOR PAGE -->
+  <section id="page-accumulator" class="page hidden">
+    <h1>🎯 Daily Accumulator</h1>
+    <p class="subtitle">Auto-built from the safest picks across today\u0027s fixtures. Different leagues for diversity.</p>
+    <div class="filter-bar">
+      <label for="accLegs">Legs:</label>
+      <select id="accLegs"><option value="3">3</option><option value="4" selected>4</option><option value="5">5</option><option value="6">6</option></select>
+      <label for="accMinProb" style="margin-left:12px;">Min prob:</label>
+      <select id="accMinProb"><option value="0.60">60%</option><option value="0.65">65%</option><option value="0.70" selected>70%</option><option value="0.75">75%</option><option value="0.80">80%</option></select>
+      <button id="accRefresh" style="margin-left:auto;">🔄 Rebuild</button>
+    </div>
+    <div id="accumulatorSummary" class="acc-summary"></div>
+    <div id="accumulatorLegs" class="acc-legs"></div>
+    <div id="accumulatorEmpty" class="empty-msg hidden">No qualifying picks today. Try lowering the min probability or adding more leagues.</div>
   </section>
 
   <!-- ══════════════ RESULTS PAGE ══════════════ -->
