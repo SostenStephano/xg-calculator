@@ -10,6 +10,7 @@
 <script type="module" src="lib.js"></script>
 <script type="module" src="app.js"></script>
 <script type="module" src="accumulator.js"></script>
+<script type="module" src="custom-leagues.js"></script>
 <script type="module" src="results.js"></script>
 <script type="module" src="accuracy.js"></script>
 </head>
@@ -26,7 +27,8 @@
       <li><a href="#accumulator" data-page="accumulator">Accumulator</a></li>
       <li><a href="#results" data-page="results">Results</a></li>
       <li><a href="#accuracy" data-page="accuracy">Accuracy</a></li>
-      <li><a href="#custom" data-page="custom">Custom</a></li>
+      <li><a href="#custom-leagues" data-page="custom-leagues">Custom Leagues</a></li>
+      <li><a href="#custom" data-page="custom">CSV Analysis</a></li>
     </ul>
   </div>
 </nav>
@@ -90,6 +92,51 @@
     <div id="accumulatorSummary" class="acc-summary"></div>
     <div id="accumulatorLegs" class="acc-legs"></div>
     <div id="accumulatorEmpty" class="empty-msg hidden">No qualifying picks today.</div>
+  </section>
+
+  <!-- CUSTOM LEAGUES PAGE -->
+  <section id="page-custom-leagues" class="page hidden">
+    <h1>Custom Leagues</h1>
+    <p class="subtitle">Upload match data as CSV. Each league gets its own model. Re-upload with filled-in goals to update results.</p>
+
+    <div class="card">
+      <h2><span class="num">1</span> Upload League CSV</h2>
+      <div class="notice">
+        <b>Required columns:</b> <code>season</code>, <code>date</code>, <code>home</code>, <code>away</code>, <code>homeGoals</code>, <code>awayGoals</code>.
+        Leave goal columns empty for upcoming matches. Re-uploading the same league merges new rows.
+      </div>
+      <div class="grid-2">
+        <div>
+          <label class="field-label">League name</label>
+          <input type="text" id="clLeagueName" placeholder="e.g. Malawi Super League" style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:10px 12px;">
+        </div>
+        <div>
+          <label class="field-label">Current season (e.g. 2025-26)</label>
+          <input type="text" id="clCurrentSeason" placeholder="2025-26" style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:10px 12px;">
+        </div>
+      </div>
+      <div style="margin-top:12px;">
+        <label class="field-label">CSV file</label>
+        <input type="file" id="clFileInput" accept=".csv,text/csv" style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:10px 12px;">
+      </div>
+      <div class="btn-row">
+        <button id="clUploadBtn">📤 Upload & Fit Model</button>
+        <button id="clClearBtn" class="secondary">🗑️ Clear Form</button>
+      </div>
+      <div id="clStatusBox" class="status"></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">2</span> Your Custom Leagues</h2>
+      <div id="clList" class="cl-list">
+        <div class="empty-msg">No custom leagues yet. Upload a CSV above to get started.</div>
+      </div>
+    </div>
+
+    <div id="clDetailCard" class="card hidden">
+      <h2><span class="num">3</span> League Detail <span class="badge" id="clDetailBadge">—</span></h2>
+      <div id="clDetailBody"></div>
+    </div>
   </section>
 
   <!-- ══════════════ RESULTS PAGE ══════════════ -->

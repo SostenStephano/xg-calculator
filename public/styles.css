@@ -843,3 +843,71 @@ tr.qualify { background: #0c2a3d; }
 .fixture-card.conf-low {
   border-left: 3px solid #7f1d1d;
 }
+
+/* ═══════════ CUSTOM LEAGUES ═══════════ */
+.cl-list { display: flex; flex-direction: column; gap: 10px; }
+
+.cl-card {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 14px;
+}
+.cl-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.cl-card-name {
+  font-weight: 700;
+  color: #f1f5f9;
+  font-size: 1rem;
+}
+.cl-card-meta {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+.cl-card-actions {
+  display: flex;
+  gap: 8px;
+}
+.cl-card-actions button {
+  padding: 6px 14px;
+  font-size: 0.8rem;
+}
+.cl-card-actions button.danger {
+  color: #fca5a5;
+  border-color: #7f1d1d;
+}
+.cl-card-actions button.danger:hover {
+  background: #7f1d1d;
+  color: #fff;
+}
+
+.cl-pred {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 12px;
+}
+.cl-pred-teams {
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin-bottom: 6px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.cl-pred-row {
+  display: flex;
+  gap: 12px;
+  font-size: 0.78rem;
+  color: #94a3b8;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.cl-pred-row b { color: #e2e8f0; }

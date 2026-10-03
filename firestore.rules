@@ -1,6 +1,8 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // Public read-only on auto-predictions and results
     match /predictions/{docId} {
       allow read: if true;
       allow write: if false;
@@ -17,9 +19,22 @@ service cloud.firestore {
       allow read: if true;
       allow write: if false;
     }
-    // Models are private
+    match /backtests/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
     match /models/{docId} {
       allow read, write: if false;
+    }
+
+    // Custom leagues: client-side read/write (personal app — lock down later)
+    match /customLeagues/{docId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    match /customMatches/{docId} {
+      allow read: if true;
+      allow write: if true;
     }
   }
 }

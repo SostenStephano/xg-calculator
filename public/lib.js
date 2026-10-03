@@ -162,3 +162,122 @@ export function renderScoreMatrixTable(matrix, maxGoals, highlight = true) {
   html += "</tbody>";
   return html;
 }
+
+// ============================================================
+// MODEL FITTING (for custom leagues)
+// ============================================================
+export function fitModel(matches) {
+  if (!matches || matches.length < 10) return null;
+
+  // matches: [{ home, away, homeGoals, awayGoals, date }]
+  const valid = matches.filter(m => m.homeGoals != null && m.awayGoals != null);
+  if (valid.length < 10) return null;
+
+  const sorted = [...valid].sort((a, b) => new Date(a.date) - new Date(b.date));
+  const n = sorted.length;
+
+  let hg = 0, ag = 0;
+  for (const m of sorted) { hg += m.homeGoals; ag += m.awayGoals; }
+  const avgH = hg / n;
+  const avgA = ag / n;
+  const sl = x => Math.log(Math.max(x, 1e-9));
+  const mu = sl(avgA);
+  const muHome = sl(avgH) - sl(avgA);
+
+  const ts = {};
+  for (const m of sorted) {
+    if (!ts[m.home]) ts[m.home] = { fW: 0, aW: 0, w: 0 };
+    if (!ts[m.away]) ts[m.away] = { fW: 0, aW: 0, w: 0 };
+    ts[m.home].fW += m.homeGoals;
+    ts[m.home].aW += m.awayGoals;
+    ts[m.home].w += 1;
+    ts[m.away].fW += m.awayGoals;
+    ts[m.away].aW += m.homeGoals;
+    ts[m.away].w += 1;
+  }
+
+  const teams = {};
+  for (const nm in ts) {
+    const s = ts[nm];
+    teams[nm] = {
+      att: sl(s.fW / s.w) - mu,
+      def: sl(s.aW / s.w) - mu,
+      matches: s.w
+    };
+  }
+  return { mu, muHome, teams, matchesUsed: n, avgHome: avgH, avgAway: avgA };
+}
+
+export function predictFromModel(model, home, away) {
+  if (!model) return null;
+  const h = model.teams[home];
+  const a = model.teams[away];
+  if (!h || !a) return null;
+  const xgHome = Math.exp(model.mu) * Math.exp(model.muHome) * Math.exp(h.att) * Math.exp(a.def);
+  const xgAway = Math.exp(model.mu) * Math.exp(a.att) * Math.exp(h.def);
+  return { xgHome, xgAway };
+}
+
+// ============================================================
+// CSV PARSING (generic — auto-detects columns)
+// ============================================================
+export function parseLeagueCsv(text) {
+  const lines = text.trim().split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) throw new Error("CSV must have a header row");
+
+  const splitLine = (line) => {
+    const out = [];
+    let cur = "", inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') { inQ = !inQ; continue; }
+      if (c === ',' && !inQ) { out.push(cur); cur = ""; continue; }
+      cur += c;
+    }
+    out.push(cur);
+    return out.map(s => s.trim());
+  };
+
+  const header = splitLine(lines[0]).map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ""));
+  const find = (aliases) => header.findIndex(h => aliases.includes(h));
+
+  const idx = {
+    season: find(["season", "seasonyear", "year"]),
+    date: find(["date", "matchdate", "kickoff"]),
+    home: find(["home", "hometeam", "h"]),
+    away: find(["away", "awayteam", "a"]),
+    homeGoals: find(["homegoals", "hg", "homescore", "fthg"]),
+    awayGoals: find(["awaygoals", "ag", "awayscore", "ftag"])
+  };
+
+  if (idx.home < 0 || idx.away < 0) {
+    throw new Error("CSV must have 'home' and 'away' columns");
+  }
+
+  const matches = [];
+  let skipped = 0;
+
+  for (let i = 1; i < lines.length; i++) {
+    const parts = splitLine(lines[i]);
+    const home = parts[idx.home] || "";
+    const away = parts[idx.away] || "";
+    if (!home || !away) { skipped++; continue; }
+
+    const parseGoals = (v) => {
+      if (v == null || v === "") return null;
+      const n = parseInt(v, 10);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    matches.push({
+      season: idx.season >= 0 ? (parts[idx.season] || "") : "",
+      date: idx.date >= 0 ? (parts[idx.date] || "") : "",
+      home,
+      away,
+      homeGoals: idx.homeGoals >= 0 ? parseGoals(parts[idx.homeGoals]) : null,
+      awayGoals: idx.awayGoals >= 0 ? parseGoals(parts[idx.awayGoals]) : null
+    });
+  }
+
+  return { matches, skipped, header };
+}
