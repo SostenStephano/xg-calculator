@@ -833,3 +833,13 @@ tr.qualify { background: #0c2a3d; }
   background: #7f1d1d;
   color: #fca5a5;
 }
+
+/* Low-confidence variant for truly even matches */
+.conf-badge.low[data-score="low"] {
+  background: #450a0a;
+  color: #fca5a5;
+  border-color: #7f1d1d;
+}
+.fixture-card.conf-low {
+  border-left: 3px solid #7f1d1d;
+}

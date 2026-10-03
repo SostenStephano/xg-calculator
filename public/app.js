@@ -63,13 +63,19 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 function getConfidence(p) {
-  // If the sync wrote confidence fields, use them.
-  // Otherwise compute a client-side fallback.
-  if (typeof p.confidence === "number") return { score: p.confidence, level: p.confidenceLevel || "low" };
-  // Fallback: derive from top-scoreline probability
+  if (typeof p.confidence === "number") {
+    return { score: p.confidence, level: p.confidenceLevel || "low" };
+  }
+  if (typeof p.probHome === "number" && typeof p.probDraw === "number" && typeof p.probAway === "number") {
+    const maxP = Math.max(p.probHome, p.probDraw, p.probAway);
+    const raw = ((maxP - 1/3) / (2/3)) * 100;
+    const score = Math.max(0, Math.min(90, Math.round(raw)));
+    const level = score >= 65 ? "high" : score >= 40 ? "medium" : "low";
+    return { score, level };
+  }
   const topP = p.topScorelineProb || 0;
-  const score = Math.round(Math.min(topP / 0.20, 1) * 100);
-  const level = score >= 65 ? "high" : score >= 45 ? "medium" : "low";
+  const score = Math.min(70, Math.round(Math.min(topP / 0.25, 1) * 100));
+  const level = score >= 55 ? "high" : score >= 30 ? "medium" : "low";
   return { score, level };
 }
 
