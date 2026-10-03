@@ -137,7 +137,7 @@ function renderFixtureCard(p) {
       </div>
       <div class="fixture-meta">
         ${confBadge}
-        <span class="fixture-league">${escapeHtml(p.leagueName || "")}</span>
+        <span class="fixture-league${p.source === "custom" ? " custom-league" : ""}">${escapeHtml(p.leagueName || "")}</span>
         <span class="fixture-date">${fmtDate(kickoff)} · ${fmtTime(kickoff)}</span>
         <span class="chevron">▼</span>
       </div>

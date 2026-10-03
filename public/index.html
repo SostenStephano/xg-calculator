@@ -97,22 +97,22 @@
   <!-- CUSTOM LEAGUES PAGE -->
   <section id="page-custom-leagues" class="page hidden">
     <h1>Custom Leagues</h1>
-    <p class="subtitle">Upload match data as CSV. Each league gets its own model. Re-upload with filled-in goals to update results.</p>
+    <p class="subtitle">Upload a CSV to add a league. Its predictions will appear on the Fixtures page automatically.</p>
 
     <div class="card">
-      <h2><span class="num">1</span> Upload League CSV</h2>
+      <h2><span class="num">1</span> Upload or Update League CSV</h2>
       <div class="notice">
-        <b>Required columns:</b> <code>season</code>, <code>date</code>, <code>home</code>, <code>away</code>, <code>homeGoals</code>, <code>awayGoals</code>.
-        Leave goal columns empty for upcoming matches. Re-uploading the same league merges new rows.
+        <b>Required columns:</b> <code>home</code>, <code>away</code>, and either <code>result</code> (like "2 - 1") or <code>homeGoals</code>/<code>awayGoals</code>.
+        Leave the result empty for upcoming matches. Use the <b>same league name</b> for all seasons you upload.
       </div>
       <div class="grid-2">
         <div>
           <label class="field-label">League name</label>
-          <input type="text" id="clLeagueName" placeholder="e.g. Malawi Super League" style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:10px 12px;">
+          <input type="text" id="clLeagueName" placeholder="e.g. Turkey Super Lig" style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:10px 12px;">
         </div>
         <div>
-          <label class="field-label">Current season (e.g. 2025-26)</label>
-          <input type="text" id="clCurrentSeason" placeholder="2025-26" style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:10px 12px;">
+          <label class="field-label">Current season (e.g. 2026-27)</label>
+          <input type="text" id="clCurrentSeason" placeholder="2026-27" style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:10px 12px;">
         </div>
       </div>
       <div style="margin-top:12px;">
@@ -120,7 +120,7 @@
         <input type="file" id="clFileInput" accept=".csv,text/csv" style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:10px 12px;">
       </div>
       <div class="btn-row">
-        <button id="clUploadBtn">📤 Upload & Fit Model</button>
+        <button id="clUploadBtn">📤 Upload & Generate Predictions</button>
         <button id="clClearBtn" class="secondary">🗑️ Clear Form</button>
       </div>
       <div id="clStatusBox" class="status"></div>
@@ -128,16 +128,14 @@
 
     <div class="card">
       <h2><span class="num">2</span> Your Custom Leagues</h2>
+      <p class="matrix-hint">Tap <b>Regenerate</b> to re-fit the model after updating results in the CSV and re-uploading.</p>
       <div id="clList" class="cl-list">
         <div class="empty-msg">No custom leagues yet. Upload a CSV above to get started.</div>
       </div>
     </div>
-
-    <div id="clDetailCard" class="card hidden">
-      <h2><span class="num">3</span> League Detail <span class="badge" id="clDetailBadge">—</span></h2>
-      <div id="clDetailBody"></div>
-    </div>
   </section>
+
+
 
   <!-- ══════════════ RESULTS PAGE ══════════════ -->
   <section id="page-results" class="page hidden">
