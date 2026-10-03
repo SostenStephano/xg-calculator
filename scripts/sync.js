@@ -109,6 +109,20 @@ function topScorelines(m, mg, n) {
   return all.slice(0, n);
 }
 
+// Take only the next matchday: greedily pick matches so each team appears once.
+function getNextMatchday(scheduled) {
+  const sorted = [...scheduled].sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
+  const seenTeams = new Set();
+  const picked = [];
+  for (const m of sorted) {
+    if (seenTeams.has(m.home) || seenTeams.has(m.away)) continue;
+    seenTeams.add(m.home);
+    seenTeams.add(m.away);
+    picked.push(m);
+  }
+  return picked;
+}
+
 function fitFromMatches(matches, opts = {}) {
   if (matches.length < 15) return null;
   const sorted = [...matches].sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
@@ -360,7 +374,7 @@ async function main() {
       seasonsUsed[league.code] = baseSeason;
 
       // Predictions
-      const upcoming = scheduled.slice(0, 15);
+      const upcoming = getNextMatchday(scheduled);
       if (upcoming.length > 0) {
         const batch = db.batch();
         let n = 0;
