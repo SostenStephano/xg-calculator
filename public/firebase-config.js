@@ -1,5 +1,5 @@
 // ============================================================
-// Firebase Web SDK configuration for project: xg-calculator
+// Firebase Web SDK configuration + Firestore exports
 // ============================================================
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
@@ -11,7 +11,14 @@ import {
   where,
   orderBy,
   limit,
-  onSnapshot
+  onSnapshot,
+  getDocs,
+  getDoc,
+  setDoc,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -27,4 +34,20 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-export { db, collection, doc, query, where, orderBy, limit, onSnapshot };
+export {
+  db,
+  collection,
+  doc,
+  query,
+  where,
+  orderBy,
+  limit,
+  onSnapshot,
+  getDocs,
+  getDoc,
+  setDoc,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  writeBatch
+};

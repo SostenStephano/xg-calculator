@@ -4,9 +4,9 @@
 // ============================================================
 
 import {
-  db, collection, doc, getDocs, setDoc, deleteDoc, query, where
+  db, collection, doc, getDocs, setDoc, deleteDoc, query, where, writeBatch
 } from "./firebase-config.js";
-import { writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
 import { fitModel, predictFromModel, parseLeagueCsv, computeStats } from "./lib.js";
 
 let customLeaguesCache = [];
