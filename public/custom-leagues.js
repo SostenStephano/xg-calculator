@@ -145,6 +145,27 @@ async function deleteLeague(id) {
 // ============================================================
 // REGENERATE PREDICTIONS & RESULTS FROM STORED MATCHES
 // ============================================================
+// Take only the next matchday: greedily pick matches so each team appears once.
+function getNextMatchday(upcoming) {
+  // Sort by date ascending (earliest first)
+  const sorted = [...upcoming].sort((a, b) => {
+    const da = a.date ? new Date(a.date).getTime() : Infinity;
+    const db = b.date ? new Date(b.date).getTime() : Infinity;
+    return da - db;
+  });
+
+  const seenTeams = new Set();
+  const picked = [];
+
+  for (const m of sorted) {
+    if (seenTeams.has(m.home) || seenTeams.has(m.away)) continue;
+    seenTeams.add(m.home);
+    seenTeams.add(m.away);
+    picked.push(m);
+  }
+  return picked;
+}
+
 async function regeneratePredictions(leagueId, showStatus = false) {
   try {
     if (showStatus) setStatus("Loading stored matches…", "info");
@@ -172,7 +193,8 @@ async function regeneratePredictions(leagueId, showStatus = false) {
     const leagueCode = "CUSTOM-" + (leagueId.slice(0, 6).toUpperCase());
 
     const finished = allMatches.filter(m => m.homeGoals != null && m.awayGoals != null);
-    const upcoming = allMatches.filter(m => m.homeGoals == null || m.awayGoals == null);
+    const allUpcoming = allMatches.filter(m => m.homeGoals == null || m.awayGoals == null);
+    const upcoming = getNextMatchday(allUpcoming);
 
     if (showStatus) setStatus(`Fitting model on ${finished.length} matches…`, "info");
     const model = fitModel(finished);
