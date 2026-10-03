@@ -238,20 +238,27 @@ export function parseLeagueCsv(text) {
     return out.map(s => s.trim());
   };
 
-  const header = splitLine(lines[0]).map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ""));
+  // Normalize headers: lowercase, remove spaces/special chars
+  const header = splitLine(lines[0]).map(h =>
+    h.toLowerCase().replace(/[^a-z0-9]/g, "")
+  );
   const find = (aliases) => header.findIndex(h => aliases.includes(h));
 
   const idx = {
-    season: find(["season", "seasonyear", "year"]),
-    date: find(["date", "matchdate", "kickoff"]),
-    home: find(["home", "hometeam", "h"]),
-    away: find(["away", "awayteam", "a"]),
-    homeGoals: find(["homegoals", "hg", "homescore", "fthg"]),
-    awayGoals: find(["awaygoals", "ag", "awayscore", "ftag"])
+    season:     find(["season", "seasonyear", "year"]),
+    date:       find(["date", "matchdate", "kickoff", "datetime"]),
+    home:       find(["home", "hometeam", "h"]),
+    away:       find(["away", "awayteam", "a"]),
+    homeGoals:  find(["homegoals", "hg", "homescore", "fthg"]),
+    awayGoals:  find(["awaygoals", "ag", "awayscore", "ftag"]),
+    result:     find(["result", "score", "ftscore", "fulltime", "scoreline"])
   };
 
   if (idx.home < 0 || idx.away < 0) {
-    throw new Error("CSV must have 'home' and 'away' columns");
+    throw new Error("CSV must have home/away columns (found: " + header.join(", ") + ")");
+  }
+  if (idx.homeGoals < 0 && idx.result < 0) {
+    throw new Error("CSV must have either homeGoals/awayGoals columns OR a combined Result column");
   }
 
   const matches = [];
@@ -263,21 +270,64 @@ export function parseLeagueCsv(text) {
     const away = parts[idx.away] || "";
     if (!home || !away) { skipped++; continue; }
 
-    const parseGoals = (v) => {
-      if (v == null || v === "") return null;
-      const n = parseInt(v, 10);
-      return Number.isFinite(n) ? n : null;
-    };
+    let homeGoals = null, awayGoals = null;
+
+    if (idx.homeGoals >= 0 && idx.awayGoals >= 0) {
+      const pg = (v) => {
+        if (v == null || v === "") return null;
+        const n = parseInt(v, 10);
+        return Number.isFinite(n) ? n : null;
+      };
+      homeGoals = pg(parts[idx.homeGoals]);
+      awayGoals = pg(parts[idx.awayGoals]);
+    } else if (idx.result >= 0) {
+      const raw = (parts[idx.result] || "").trim();
+      if (raw) {
+        // Handles "1 - 0", "1-0", "1 : 0", "3 : 2"
+        const m = raw.match(/(\d+)\s*[-:–]\s*(\d+)/);
+        if (m) {
+          homeGoals = parseInt(m[1], 10);
+          awayGoals = parseInt(m[2], 10);
+        }
+      }
+    }
+
+    let dateStr = "";
+    if (idx.date >= 0) {
+      const rawDate = (parts[idx.date] || "").trim();
+      dateStr = normalizeDate(rawDate);
+    }
 
     matches.push({
       season: idx.season >= 0 ? (parts[idx.season] || "") : "",
-      date: idx.date >= 0 ? (parts[idx.date] || "") : "",
+      date: dateStr,
       home,
       away,
-      homeGoals: idx.homeGoals >= 0 ? parseGoals(parts[idx.homeGoals]) : null,
-      awayGoals: idx.awayGoals >= 0 ? parseGoals(parts[idx.awayGoals]) : null
+      homeGoals,
+      awayGoals
     });
   }
 
   return { matches, skipped, header };
 }
+
+// Convert "11/08/2023 21:00" -> "2023-08-11T21:00:00"
+function normalizeDate(raw) {
+  if (!raw) return "";
+  // Already ISO
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw;
+
+  // DD/MM/YYYY HH:MM or DD/MM/YYYY
+  const m = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+(\d{1,2}):(\d{2}))?/);
+  if (m) {
+    const [, dd, mm, yyyy, hh = "00", min = "00"] = m;
+    const d = String(dd).padStart(2, "0");
+    const mo = String(mm).padStart(2, "0");
+    const h = String(hh).padStart(2, "0");
+    return `${yyyy}-${mo}-${d}T${h}:${min}:00`;
+  }
+
+  // Fallback: return as-is
+  return raw;
+}
+
