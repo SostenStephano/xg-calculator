@@ -301,8 +301,8 @@ export function parseLeagueCsv(text) {
     matches.push({
       season: idx.season >= 0 ? (parts[idx.season] || "") : "",
       date: dateStr,
-      home,
-      away,
+      home: normalizeTeamName(home),
+      away: normalizeTeamName(away),
       homeGoals,
       awayGoals
     });
@@ -331,3 +331,76 @@ function normalizeDate(raw) {
   return raw;
 }
 
+
+// ============================================================
+// TEAM NAME NORMALIZATION
+// Maps known aliases (e.g. "FC Cincinnati") to canonical short
+// names ("Cincinnati") so seasons with different naming don't
+// get treated as separate teams.
+// ============================================================
+const TEAM_ALIASES = {
+  // MLS long names → short
+  "st. louis city sc": "st. louis",
+  "st louis city sc": "st. louis",
+  "charlotte fc": "charlotte",
+  "fc cincinnati": "cincinnati",
+  "atlanta united": "atlanta",
+  "atlanta united fc": "atlanta",
+  "d.c. united": "d.c.",
+  "dc united": "d.c.",
+  "philadelphia union": "philadelphia",
+  "orlando city": "orlando",
+  "orlando city sc": "orlando",
+  "red bull new york": "new york",
+  "new york red bulls": "new york",
+  "vancouver whitecaps fc": "vancouver",
+  "vancouver whitecaps": "vancouver",
+  "real salt lake": "salt lake",
+  "austin fc": "austin",
+  "minnesota united fc": "minnesota",
+  "minnesota united": "minnesota",
+  "fc dallas": "dallas",
+  "toronto fc": "toronto",
+  "houston dynamo fc": "houston",
+  "houston dynamo": "houston",
+  "chicago fire fc": "chicago",
+  "chicago fire": "chicago",
+  "nashville sc": "nashville",
+  "new england revolution": "new england",
+  "los angeles football club": "lafc",
+  "inter miami cf": "miami",
+  "inter miami": "miami",
+  "portland timbers": "portland",
+  "portland timbers fc": "portland",
+  "columbus crew": "columbus",
+  "columbus crew sc": "columbus",
+  "san diego fc": "san diego",
+  "cf montréal": "montréal",
+  "cf montreal": "montreal",
+  "san jose earthquakes": "san jose",
+  "sporting kansas city": "kansas city",
+  "sporting kc": "kansas city",
+  "la galaxy": "la",
+  "new york city football club": "new york city",
+  "new york city fc": "new york city",
+  "seattle sounders fc": "seattle",
+  "seattle sounders": "seattle",
+  "colorado rapids": "colorado",
+  // Common aliases across other leagues
+  "manchester city fc": "manchester city",
+  "manchester united fc": "manchester united",
+  "arsenal fc": "arsenal",
+  "chelsea fc": "chelsea",
+  "liverpool fc": "liverpool",
+  "tottenham hotspur": "tottenham",
+  "spurs": "tottenham",
+  "wolverhampton wanderers": "wolves",
+  "brighton and hove albion": "brighton",
+  "nottingham forest": "nottm forest"
+};
+
+export function normalizeTeamName(name) {
+  if (!name) return name;
+  const key = String(name).toLowerCase().trim();
+  return TEAM_ALIASES[key] || name.trim();
+}

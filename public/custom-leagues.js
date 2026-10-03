@@ -8,7 +8,7 @@ import {
   db, collection, doc, getDocs, setDoc, deleteDoc, query, where, writeBatch
 } from "./firebase-config.js";
 import {
-  fitModel, predictFromModel, parseLeagueCsv, computeStats
+  fitModel, predictFromModel, parseLeagueCsv, computeStats, normalizeTeamName
 } from "./lib.js";
 
 let customLeaguesCache = [];
@@ -153,7 +153,14 @@ async function regeneratePredictions(leagueId, showStatus = false) {
       query(collection(db, "customMatches"), where("leagueId", "==", leagueId))
     );
     const allMatches = [];
-    matchesSnap.forEach(d => allMatches.push(d.data()));
+    matchesSnap.forEach(d => {
+      const m = d.data();
+      allMatches.push({
+        ...m,
+        home: normalizeTeamName(m.home),
+        away: normalizeTeamName(m.away)
+      });
+    });
 
     if (allMatches.length === 0) {
       if (showStatus) setStatus("No matches stored for this league.", "err");
