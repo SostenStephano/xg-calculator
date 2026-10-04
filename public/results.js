@@ -1,6 +1,3 @@
-import {
-  db, collection, query, orderBy, limit, onSnapshot
-} from "./firebase-config.js";
 import { fmtDate } from "./lib.js";
 
 let allResults = [];
@@ -12,9 +9,8 @@ const resQuery = query(
   limit(500)
 );
 
-onSnapshot(resQuery, snapshot => {
-  allResults = [];
-  snapshot.forEach(doc => allResults.push({ id: doc.id, ...doc.data() }));
+subscribeResults(data => {
+  allResults = data;
 
   const sel = document.getElementById("resultsLeague");
   if (sel) {

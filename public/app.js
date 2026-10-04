@@ -1,6 +1,4 @@
-import {
-  db, collection, query, orderBy, limit, onSnapshot
-} from "./firebase-config.js";
+import { subscribePredictions } from "./data-store.js";
 import {
   computeStats, buildTips, stars, confidenceClass,
   fmtDate, fmtTime, renderScoreMatrixTable
@@ -37,11 +35,8 @@ let fixturesLeagueFilter = "";
 let fixturesSortMode = "kickoff";
 let expandedIds = new Set();
 
-const predQuery = query(collection(db, "predictions"), orderBy("kickoff", "asc"), limit(500));
-
-onSnapshot(predQuery, snapshot => {
-  allPredictions = [];
-  snapshot.forEach(doc => allPredictions.push({ id: doc.id, ...doc.data() }));
+subscribePredictions(data => {
+  allPredictions = data;
   const sel = document.getElementById("fixturesLeague");
   if (sel) {
     const current = sel.value;

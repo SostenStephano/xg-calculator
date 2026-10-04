@@ -2,9 +2,6 @@
 // Accumulator / Bet Slip — market-tabbed selection builder
 // ============================================================
 
-import {
-  db, collection, query, orderBy, limit, onSnapshot
-} from "./firebase-config.js";
 import { computeStats, buildTips, fmtDate, fmtTime } from "./lib.js";
 
 // ---------- MARKET DEFINITIONS ----------
@@ -49,9 +46,8 @@ const predQuery = query(
   limit(500)
 );
 
-onSnapshot(predQuery, snapshot => {
-  allPredictions = [];
-  snapshot.forEach(doc => allPredictions.push({ id: doc.id, ...doc.data() }));
+subscribePredictions(data => {
+  allPredictions = data;
   rebuild();
 });
 
