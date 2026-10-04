@@ -1,16 +1,11 @@
+import { subscribeResults } from "./data-store.js";
 import { fmtDate } from "./lib.js";
 
 let allResults = [];
 let resultsLeagueFilter = "";
 
-const resQuery = query(
-  collection(db, "results"),
-  orderBy("kickoff", "desc"),
-  limit(500)
-);
-
-subscribeResults(data => {
-  allResults = data;
+subscribeResults(results => {
+  allResults = results;
 
   const sel = document.getElementById("resultsLeague");
   if (sel) {
@@ -78,7 +73,7 @@ function renderResults() {
 }
 
 function renderResultRow(r) {
-  const kickoff = r.kickoff.toDate();
+  const kickoff = r.kickoff?.toDate ? r.kickoff.toDate() : new Date(r.kickoff || 0);
   const li = document.createElement("li");
   li.className = "result-row";
   const homeWin = r.homeGoals > r.awayGoals;

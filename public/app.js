@@ -35,8 +35,9 @@ let fixturesLeagueFilter = "";
 let fixturesSortMode = "kickoff";
 let expandedIds = new Set();
 
-subscribePredictions(data => {
-  allPredictions = data;
+subscribePredictions(predictions => {
+  allPredictions = predictions;
+
   const sel = document.getElementById("fixturesLeague");
   if (sel) {
     const current = sel.value;
@@ -78,15 +79,20 @@ function renderFixtures() {
   const container = document.getElementById("fixturesList");
   if (!container) return;
 
-  let filtered = fixturesLeagueFilter ? allPredictions.filter(p => p.leagueName === fixturesLeagueFilter) : [...allPredictions];
+  let filtered = fixturesLeagueFilter
+    ? allPredictions.filter(p => p.leagueName === fixturesLeagueFilter)
+    : [...allPredictions];
 
-  // Sorting
   if (fixturesSortMode === "confidence") {
     filtered.sort((a, b) => getConfidence(b).score - getConfidence(a).score);
   } else if (fixturesSortMode === "scoreline") {
     filtered.sort((a, b) => (b.topScorelineProb || 0) - (a.topScorelineProb || 0));
   } else {
-    filtered.sort((a, b) => a.kickoff.toDate() - b.kickoff.toDate());
+    filtered.sort((a, b) => {
+      const ka = a.kickoff?.toDate ? a.kickoff.toDate() : new Date(a.kickoff || 0);
+      const kb = b.kickoff?.toDate ? b.kickoff.toDate() : new Date(b.kickoff || 0);
+      return ka - kb;
+    });
   }
 
   const countEl = document.getElementById("fixturesCount");
@@ -97,7 +103,6 @@ function renderFixtures() {
     return;
   }
 
-  // Preserve expansion state
   container.querySelectorAll(".fixture-card").forEach(card => {
     if (!card.classList.contains("hidden") && card.dataset.fid) expandedIds.add(card.dataset.fid);
   });
@@ -105,7 +110,6 @@ function renderFixtures() {
   container.innerHTML = "";
   filtered.forEach(p => container.appendChild(renderFixtureCard(p)));
 
-  // Re-expand rows that were open
   container.querySelectorAll(".fixture-card").forEach(card => {
     if (expandedIds.has(card.dataset.fid)) {
       const header = card.querySelector(".fixture-header");
@@ -115,7 +119,7 @@ function renderFixtures() {
 }
 
 function renderFixtureCard(p) {
-  const kickoff = p.kickoff.toDate();
+  const kickoff = p.kickoff?.toDate ? p.kickoff.toDate() : new Date(p.kickoff || 0);
   const conf = getConfidence(p);
   const card = document.createElement("div");
   card.className = "fixture-card conf-" + conf.level;
