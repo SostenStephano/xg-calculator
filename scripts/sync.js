@@ -374,6 +374,22 @@ async function main() {
       seasonsUsed[league.code] = baseSeason;
 
       // Predictions
+      
+      
+      // Delete old predictions for this league before writing fresh ones
+      try {
+        const oldSnap = await db.collection("predictions")
+          .where("leagueId", "==", league.id)
+          .get();
+        if (!oldSnap.empty) {
+          const delBatch = db.batch();
+          oldSnap.forEach(d => delBatch.delete(d.ref));
+          await delBatch.commit();
+          console.log(`   🧹 Cleared ${oldSnap.size} stale predictions`);
+        }
+      } catch (e) { console.error("Cleanup failed:", e.message); }
+
+
       const upcoming = getNextMatchday(scheduled);
       if (upcoming.length > 0) {
         const batch = db.batch();
