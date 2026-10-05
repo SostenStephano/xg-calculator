@@ -1,7 +1,5 @@
 // ============================================================
-// Custom Leagues — CSV upload, model fit, writes predictions
-// and results to the shared collections so they appear in the
-// Fixtures / Accumulator pages automatically.
+// Custom Leagues — upload CSV, in-app result entry, model fit.
 // ============================================================
 
 import {
@@ -12,8 +10,9 @@ import {
 } from "./lib.js";
 
 let customLeaguesCache = [];
+let expandedLeagueId = null;
 
-// ---------- UI helpers ----------
+// ---------- UI ----------
 function setStatus(msg, kind = "info") {
   const box = document.getElementById("clStatusBox");
   if (!box) return;
@@ -27,7 +26,6 @@ function slugify(s) {
 }
 
 function hashKey(str) {
-  // small deterministic hash for doc IDs
   let h = 0;
   for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
   return Math.abs(h).toString(36);
@@ -39,7 +37,15 @@ function escapeHtml(s) {
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
-// ---------- LOAD LEAGUE LIST ----------
+function fmtDate(d) {
+  if (!d) return "—";
+  try {
+    const date = new Date(d);
+    return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  } catch { return d; }
+}
+
+// ---------- LOAD & RENDER LEAGUE LIST ----------
 async function loadLeagues() {
   const list = document.getElementById("clList");
   if (!list) return;
@@ -70,14 +76,19 @@ function renderLeagues() {
             ${l.currentSeason ? `Season ${escapeHtml(l.currentSeason)} · ` : ""}
             ${l.matchCount || 0} matches ·
             ${l.finishedCount || 0} finished ·
-            ${l.upcomingCount || 0} upcoming ·
-            ${l.teamCount || 0} teams
+            ${l.upcomingCount || 0} upcoming
           </div>
         </div>
         <div class="cl-card-actions">
+          <button class="secondary" data-action="results" data-id="${l.id}">
+            ${expandedLeagueId === l.id ? "✕ Close" : "📝 Enter Results"}
+          </button>
           <button class="secondary" data-action="regen" data-id="${l.id}">🔄 Regenerate</button>
           <button class="secondary danger" data-action="delete" data-id="${l.id}">Delete</button>
         </div>
+      </div>
+      <div class="cl-results-panel" data-panel="${l.id}"${expandedLeagueId === l.id ? "" : ' style="display:none;"'}>
+        <div class="empty-msg">Click "Enter Results" to load matches…</div>
       </div>
     </div>
   `).join("");
@@ -85,94 +96,199 @@ function renderLeagues() {
   list.querySelectorAll("button[data-action]").forEach(btn => {
     btn.addEventListener("click", async () => {
       const id = btn.dataset.id;
+      if (btn.dataset.action === "results") return toggleResultsPanel(id);
       if (btn.dataset.action === "regen") return regeneratePredictions(id, true);
       if (btn.dataset.action === "delete") return deleteLeague(id);
     });
   });
+
+  if (expandedLeagueId) loadResultsPanel(expandedLeagueId);
 }
 
-async function deleteLeague(id) {
-  if (!confirm("Delete this custom league, all its matches, and its predictions?")) return;
-  setStatus("Deleting…", "info");
+async function toggleResultsPanel(leagueId) {
+  if (expandedLeagueId === leagueId) {
+    expandedLeagueId = null;
+    renderLeagues();
+  } else {
+    expandedLeagueId = leagueId;
+    renderLeagues();
+  }
+}
+
+// ---------- LOAD MATCHES INTO RESULTS PANEL ----------
+async function loadResultsPanel(leagueId) {
+  const panel = document.querySelector(`[data-panel="${leagueId}"]`);
+  if (!panel) return;
+
+  panel.innerHTML = '<div class="empty-msg">Loading matches…</div>';
+
   try {
-    let matchDeleted = 0;
-    while (true) {
-      const q = query(collection(db, "customMatches"), where("leagueId", "==", id));
-      const snap = await getDocs(q);
-      if (snap.empty) break;
-      const batch = writeBatch(db);
-      let count = 0;
-      snap.forEach(d => { if (count < 400) { batch.delete(d.ref); count++; } });
-      await batch.commit();
-      matchDeleted += count;
-      if (count < 400) break;
+    const snap = await getDocs(query(collection(db, "customMatches"), where("leagueId", "==", leagueId)));
+    const matches = [];
+    snap.forEach(d => matches.push({ _docId: d.id, ...d.data() }));
+
+    // Show ONLY upcoming matches (no goals)
+    const upcoming = matches.filter(m => m.homeGoals == null || m.awayGoals == null);
+    upcoming.sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
+
+    if (upcoming.length === 0) {
+      panel.innerHTML = '<div class="empty-msg">No upcoming matches to enter results for.</div>';
+      return;
     }
 
-    let predDeleted = 0;
-    while (true) {
-      const q = query(collection(db, "predictions"), where("leagueId", "==", id), where("source", "==", "custom"));
-      const snap = await getDocs(q);
-      if (snap.empty) break;
-      const batch = writeBatch(db);
-      let count = 0;
-      snap.forEach(d => { if (count < 400) { batch.delete(d.ref); count++; } });
-      await batch.commit();
-      predDeleted += count;
-      if (count < 400) break;
-    }
+    panel.innerHTML = `
+      <div class="cl-results-header">
+        <span>Enter the final score for matches that have finished. Leave blank to skip.</span>
+      </div>
+      <div class="cl-results-list">
+        ${upcoming.map((m, i) => `
+          <div class="cl-result-row" data-row="${i}">
+            <div class="cl-result-date">${fmtDate(m.date)}</div>
+            <div class="cl-result-teams">
+              <span class="cl-team home">${escapeHtml(m.home)}</span>
+              <span class="cl-vs">vs</span>
+              <span class="cl-team away">${escapeHtml(m.away)}</span>
+            </div>
+            <div class="cl-result-inputs">
+              <input type="number" min="0" max="20" class="cl-goal-input" data-side="home" data-i="${i}" placeholder="—">
+              <span class="cl-dash">–</span>
+              <input type="number" min="0" max="20" class="cl-goal-input" data-side="away" data-i="${i}" placeholder="—">
+            </div>
+          </div>
+        `).join("")}
+      </div>
+      <div class="cl-results-actions">
+        <button id="clSaveAll">💾 Save All Finished Results</button>
+        <span id="clSaveStatus" class="cl-save-status"></span>
+      </div>
+    `;
 
-    let resDeleted = 0;
-    while (true) {
-      const q = query(collection(db, "results"), where("leagueId", "==", id), where("source", "==", "custom"));
-      const snap = await getDocs(q);
-      if (snap.empty) break;
-      const batch = writeBatch(db);
-      let count = 0;
-      snap.forEach(d => { if (count < 400) { batch.delete(d.ref); count++; } });
-      await batch.commit();
-      resDeleted += count;
-      if (count < 400) break;
+    // Wire up save
+    const saveBtn = panel.querySelector("#clSaveAll");
+    if (saveBtn) {
+      saveBtn.addEventListener("click", () => saveAllResults(leagueId, upcoming, panel));
     }
-
-    await deleteDoc(doc(db, "customLeagues", id));
-    setStatus(`✅ Deleted: ${matchDeleted} matches, ${predDeleted} predictions, ${resDeleted} results`, "ok");
-    await loadLeagues();
   } catch (err) {
-    setStatus("Delete failed: " + err.message, "err");
+    panel.innerHTML = `<div class="empty-msg" style="color:#fca5a5;">Failed: ${err.message}</div>`;
   }
 }
 
-// ============================================================
-// REGENERATE PREDICTIONS & RESULTS FROM STORED MATCHES
-// ============================================================
-// Take only the next matchday: greedily pick matches so each team appears once.
-function getNextMatchday(upcoming) {
-  // Sort by date ascending (earliest first)
-  const sorted = [...upcoming].sort((a, b) => {
-    const da = a.date ? new Date(a.date).getTime() : Infinity;
-    const db = b.date ? new Date(b.date).getTime() : Infinity;
-    return da - db;
-  });
+// ---------- SAVE RESULTS ----------
+async function saveAllResults(leagueId, matches, panel) {
+  const saveBtn = panel.querySelector("#clSaveAll");
+  const statusEl = panel.querySelector("#clSaveStatus");
 
-  const seenTeams = new Set();
-  const picked = [];
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Saving…"; }
+  if (statusEl) statusEl.textContent = "";
 
-  for (const m of sorted) {
-    if (seenTeams.has(m.home) || seenTeams.has(m.away)) continue;
-    seenTeams.add(m.home);
-    seenTeams.add(m.away);
-    picked.push(m);
+  // Collect inputs
+  const updates = [];
+  for (let i = 0; i < matches.length; i++) {
+    const hIn = panel.querySelector(`input[data-side="home"][data-i="${i}"]`);
+    const aIn = panel.querySelector(`input[data-side="away"][data-i="${i}"]`);
+    const h = hIn?.value;
+    const a = aIn?.value;
+
+    if (h === "" || a === "" || h == null || a == null) continue;
+
+    const hG = parseInt(h, 10);
+    const aG = parseInt(a, 10);
+    if (!Number.isFinite(hG) || !Number.isFinite(aG) || hG < 0 || aG < 0) continue;
+
+    updates.push({ match: matches[i], homeGoals: hG, awayGoals: aG });
   }
-  return picked;
+
+  if (updates.length === 0) {
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "💾 Save All Finished Results"; }
+    if (statusEl) statusEl.textContent = "Enter at least one score to save.";
+    return;
+  }
+
+  let saved = 0, deletedPreds = 0, createdResults = 0;
+  const failures = [];
+
+  for (const u of updates) {
+    try {
+      const m = u.match;
+      const normHome = normalizeTeamName(m.home);
+      const normAway = normalizeTeamName(m.away);
+
+      // 1. Update customMatches doc with the result
+      await setDoc(doc(db, "customMatches", m._docId), {
+        homeGoals: u.homeGoals,
+        awayGoals: u.awayGoals
+      }, { merge: true });
+
+      // 2. Delete the corresponding prediction (if it exists)
+      const predId = `custom__${leagueId}__${hashKey(normHome + "|" + normAway + "|" + (m.date || ""))}`;
+      try {
+        await deleteDoc(doc(db, "predictions", predId));
+        deletedPreds++;
+      } catch (_) { /* not found, fine */ }
+
+      // 3. Create the result doc
+      await setDoc(doc(db, "results", predId), {
+        fixtureId: predId,
+        source: "custom",
+        leagueId,
+        leagueName: m.leagueName || "",
+        leagueCode: "CUSTOM",
+        homeTeam: normHome,
+        awayTeam: normAway,
+        homeGoals: u.homeGoals,
+        awayGoals: u.awayGoals,
+        kickoff: m.date ? new Date(m.date) : new Date(),
+        status: "FT",
+        fetchedAt: new Date()
+      }, { merge: true });
+      createdResults++;
+
+      saved++;
+    } catch (err) {
+      failures.push(`${u.match.home} vs ${u.match.away}: ${err.message}`);
+    }
+  }
+
+  // Update league stats
+  try {
+    const statsSnap = await getDocs(query(collection(db, "customMatches"), where("leagueId", "==", leagueId)));
+    let finished = 0, upcoming = 0;
+    statsSnap.forEach(d => {
+      const x = d.data();
+      if (x.homeGoals != null && x.awayGoals != null) finished++;
+      else upcoming++;
+    });
+    await setDoc(doc(db, "customLeagues", leagueId), {
+      finishedCount: finished,
+      upcomingCount: upcoming,
+      lastResultUpdate: new Date()
+    }, { merge: true });
+  } catch (_) {}
+
+  if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "💾 Save All Finished Results"; }
+
+  if (statusEl) {
+    if (failures.length === 0) {
+      statusEl.innerHTML = `✅ Saved ${saved} results · ${deletedPreds} predictions removed · ${createdResults} results added.<br>Tap <b>Regenerate</b> to re-fit the model with the new data.`;
+      statusEl.style.color = "#6ee7b7";
+    } else {
+      statusEl.innerHTML = `⚠️ Saved ${saved}, ${failures.length} failed:<br>${failures.map(f => escapeHtml(f)).join("<br>")}`;
+      statusEl.style.color = "#fca5a5";
+    }
+  }
+
+  await loadLeagues();
+  // Reload the panel to remove the now-finished matches
+  expandedLeagueId = leagueId;
+  await loadResultsPanel(leagueId);
 }
 
+// ---------- REGENERATE ----------
 async function regeneratePredictions(leagueId, showStatus = false) {
   try {
     if (showStatus) setStatus("Loading stored matches…", "info");
 
-    const matchesSnap = await getDocs(
-      query(collection(db, "customMatches"), where("leagueId", "==", leagueId))
-    );
+    const matchesSnap = await getDocs(query(collection(db, "customMatches"), where("leagueId", "==", leagueId)));
     const allMatches = [];
     matchesSnap.forEach(d => {
       const m = d.data();
@@ -194,14 +310,26 @@ async function regeneratePredictions(leagueId, showStatus = false) {
 
     const finished = allMatches.filter(m => m.homeGoals != null && m.awayGoals != null);
     const allUpcoming = allMatches.filter(m => m.homeGoals == null || m.awayGoals == null);
-    const upcoming = getNextMatchday(allUpcoming);
+
+    // Next-matchday filter: one match per team
+    const sortedUpcoming = [...allUpcoming].sort((a, b) => {
+      const da = a.date ? new Date(a.date).getTime() : Infinity;
+      const db_ = b.date ? new Date(b.date).getTime() : Infinity;
+      return da - db_;
+    });
+    const seenTeams = new Set();
+    const upcoming = [];
+    for (const m of sortedUpcoming) {
+      if (seenTeams.has(m.home) || seenTeams.has(m.away)) continue;
+      seenTeams.add(m.home);
+      seenTeams.add(m.away);
+      upcoming.push(m);
+    }
 
     if (showStatus) setStatus(`Fitting model on ${finished.length} matches…`, "info");
     const model = fitModel(finished);
 
-    // ---------- WRITE RESULTS ----------
-    if (showStatus) setStatus(`Writing ${finished.length} results…`, "info");
-    // Delete old custom results first
+    // Delete old custom results
     let delResCount = 0;
     while (true) {
       const q = query(collection(db, "results"), where("leagueId", "==", leagueId), where("source", "==", "custom"));
@@ -215,34 +343,27 @@ async function regeneratePredictions(leagueId, showStatus = false) {
       if (count < 400) break;
     }
 
+    // Write results
     const BATCH = 400;
     for (let i = 0; i < finished.length; i += BATCH) {
       const batch = writeBatch(db);
       const chunk = finished.slice(i, i + BATCH);
       for (const m of chunk) {
-        const docId = `custom__${leagueId}__${hashKey(m.home + "|" + m.away + "|" + m.date)}`;
+        const docId = `custom__${leagueId}__${hashKey(m.home + "|" + m.away + "|" + (m.date || ""))}`;
         const ref = doc(db, "results", docId);
         batch.set(ref, {
-          fixtureId: docId,
-          source: "custom",
-          leagueId,
-          leagueName,
-          leagueCode,
-          homeTeam: m.home,
-          awayTeam: m.away,
-          homeGoals: m.homeGoals,
-          awayGoals: m.awayGoals,
+          fixtureId: docId, source: "custom",
+          leagueId, leagueName, leagueCode,
+          homeTeam: m.home, awayTeam: m.away,
+          homeGoals: m.homeGoals, awayGoals: m.awayGoals,
           kickoff: m.date ? new Date(m.date) : new Date(),
-          status: "FT",
-          fetchedAt: new Date()
+          status: "FT", fetchedAt: new Date()
         });
       }
       await batch.commit();
     }
 
-    // ---------- WRITE PREDICTIONS ----------
-    // Delete old custom predictions first
-    let delPredCount = 0;
+    // Delete old custom predictions
     while (true) {
       const q = query(collection(db, "predictions"), where("leagueId", "==", leagueId), where("source", "==", "custom"));
       const snap = await getDocs(q);
@@ -251,13 +372,12 @@ async function regeneratePredictions(leagueId, showStatus = false) {
       let count = 0;
       snap.forEach(d => { if (count < 400) { batch.delete(d.ref); count++; } });
       await batch.commit();
-      delPredCount += count;
       if (count < 400) break;
     }
 
+    // Write new predictions
     let predWritten = 0;
     if (model && upcoming.length > 0) {
-      if (showStatus) setStatus(`Writing predictions for ${upcoming.length} upcoming matches…`, "info");
       for (let i = 0; i < upcoming.length; i += BATCH) {
         const batch = writeBatch(db);
         const chunk = upcoming.slice(i, i + BATCH);
@@ -266,22 +386,15 @@ async function regeneratePredictions(leagueId, showStatus = false) {
           if (!pred) continue;
           const stats = computeStats(pred.xgHome, pred.xgAway);
           const top = stats.top5[0];
-          const docId = `custom__${leagueId}__${hashKey(m.home + "|" + m.away + "|" + m.date)}`;
+          const docId = `custom__${leagueId}__${hashKey(m.home + "|" + m.away + "|" + (m.date || ""))}`;
           const ref = doc(db, "predictions", docId);
           batch.set(ref, {
-            fixtureId: docId,
-            source: "custom",
-            leagueId,
-            leagueName,
-            leagueCode,
-            homeTeam: m.home,
-            awayTeam: m.away,
+            fixtureId: docId, source: "custom",
+            leagueId, leagueName, leagueCode,
+            homeTeam: m.home, awayTeam: m.away,
             kickoff: m.date ? new Date(m.date) : new Date(),
-            xgHome: pred.xgHome,
-            xgAway: pred.xgAway,
-            probHome: stats.pH,
-            probDraw: stats.pD,
-            probAway: stats.pA,
+            xgHome: pred.xgHome, xgAway: pred.xgAway,
+            probHome: stats.pH, probDraw: stats.pD, probAway: stats.pA,
             topScoreline: `${top.k}-${top.h}`,
             topScorelineProb: top.p,
             generatedAt: new Date()
@@ -292,7 +405,6 @@ async function regeneratePredictions(leagueId, showStatus = false) {
       }
     }
 
-    // ---------- UPDATE LEAGUE METADATA ----------
     await setDoc(doc(db, "customLeagues", leagueId), {
       matchCount: allMatches.length,
       finishedCount: finished.length,
@@ -302,11 +414,7 @@ async function regeneratePredictions(leagueId, showStatus = false) {
     }, { merge: true });
 
     if (showStatus) {
-      setStatus(
-        `✅ Regenerated: ${finished.length} results, ${predWritten} predictions. ` +
-        `Model fitted on ${finished.length} matches.`,
-        "ok"
-      );
+      setStatus(`✅ Regenerated: ${finished.length} results · ${predWritten} predictions. Model fitted on ${finished.length} matches.`, "ok");
     }
     await loadLeagues();
   } catch (err) {
@@ -315,9 +423,53 @@ async function regeneratePredictions(leagueId, showStatus = false) {
   }
 }
 
-// ============================================================
-// UPLOAD
-// ============================================================
+// ---------- DELETE ----------
+async function deleteLeague(id) {
+  if (!confirm("Delete this custom league, all its matches, and its predictions?")) return;
+  setStatus("Deleting…", "info");
+  try {
+    // Delete matches
+    let matchDeleted = 0;
+    while (true) {
+      const snap = await getDocs(query(collection(db, "customMatches"), where("leagueId", "==", id)));
+      if (snap.empty) break;
+      const batch = writeBatch(db);
+      let count = 0;
+      snap.forEach(d => { if (count < 400) { batch.delete(d.ref); count++; } });
+      await batch.commit();
+      matchDeleted += count;
+      if (count < 400) break;
+    }
+    // Delete predictions
+    while (true) {
+      const snap = await getDocs(query(collection(db, "predictions"), where("leagueId", "==", id), where("source", "==", "custom")));
+      if (snap.empty) break;
+      const batch = writeBatch(db);
+      let count = 0;
+      snap.forEach(d => { if (count < 400) { batch.delete(d.ref); count++; } });
+      await batch.commit();
+      if (count < 400) break;
+    }
+    // Delete results
+    while (true) {
+      const snap = await getDocs(query(collection(db, "results"), where("leagueId", "==", id), where("source", "==", "custom")));
+      if (snap.empty) break;
+      const batch = writeBatch(db);
+      let count = 0;
+      snap.forEach(d => { if (count < 400) { batch.delete(d.ref); count++; } });
+      await batch.commit();
+      if (count < 400) break;
+    }
+    await deleteDoc(doc(db, "customLeagues", id));
+    setStatus(`✅ Deleted: ${matchDeleted} matches and all predictions`, "ok");
+    if (expandedLeagueId === id) expandedLeagueId = null;
+    await loadLeagues();
+  } catch (err) {
+    setStatus("Delete failed: " + err.message, "err");
+  }
+}
+
+// ---------- UPLOAD ----------
 async function handleUpload() {
   const nameEl = document.getElementById("clLeagueName");
   const seasonEl = document.getElementById("clCurrentSeason");
@@ -349,8 +501,7 @@ async function handleUpload() {
       const chunk = matches.slice(i, i + BATCH);
       for (const m of chunk) {
         const key = [m.season || "_", m.date || "_", m.home, m.away]
-          .join("__")
-          .replace(/[\/\\#\[\]\*\?]/g, "_");
+          .join("__").replace(/[\/\\#\[\]\*\?]/g, "_");
         const docId = `${leagueId}__${key}`;
         const ref = doc(db, "customMatches", docId);
         batch.set(ref, {
@@ -368,18 +519,17 @@ async function handleUpload() {
       setStatus(`Written ${written}/${matches.length} matches…`, "info");
     }
 
-    // Save/update league metadata
     await setDoc(doc(db, "customLeagues", leagueId), {
       name: leagueName,
       currentSeason: currentSeason || "",
       updatedAt: new Date()
     }, { merge: true });
 
-    setStatus(`Uploaded ${written} matches. Fitting model & generating predictions…`, "info");
+    setStatus(`Uploaded ${written} matches. Fitting model…`, "info");
     await loadLeagues();
     await regeneratePredictions(leagueId, false);
 
-    setStatus(`✅ Uploaded ${written} matches. Predictions are now live on the Fixtures page.`, "ok");
+    setStatus(`✅ Uploaded ${written} matches. Predictions are live on the Fixtures page.`, "ok");
   } catch (err) {
     setStatus("Upload failed: " + err.message, "err");
     console.error(err);

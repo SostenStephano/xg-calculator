@@ -918,3 +918,106 @@ tr.qualify { background: #0c2a3d; }
   color: #ddd6fe;
   border: 1px solid #7c3aed;
 }
+
+/* ═══════════ ENTER RESULTS PANEL ═══════════ */
+.cl-results-panel {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #334155;
+}
+
+.cl-results-header {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  background: #0f172a;
+  border-radius: 6px;
+  border-left: 3px solid #38bdf8;
+}
+
+.cl-results-list {
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.cl-result-row {
+  display: grid;
+  grid-template-columns: 52px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid #1e293b;
+  font-size: 0.85rem;
+}
+
+.cl-result-row:last-child { border-bottom: none; }
+
+.cl-result-date {
+  font-size: 0.7rem;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.cl-result-teams {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.cl-team { font-weight: 600; color: #e2e8f0; }
+.cl-team.home { color: #38bdf8; }
+.cl-team.away { color: #a78bfa; }
+.cl-vs { color: #475569; font-size: 0.75rem; }
+
+.cl-result-inputs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cl-goal-input {
+  width: 44px;
+  padding: 6px 4px;
+  text-align: center;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  color: #e2e8f0;
+  font-family: 'Courier New', monospace;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+.cl-goal-input:focus {
+  outline: none;
+  border-color: #38bdf8;
+}
+.cl-goal-input::-webkit-outer-spin-button,
+.cl-goal-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.cl-goal-input[type=number] { -moz-appearance: textfield; }
+
+.cl-dash { color: #64748b; font-weight: 700; }
+
+.cl-results-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #334155;
+  flex-wrap: wrap;
+}
+
+.cl-save-status {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  flex: 1;
+  min-width: 200px;
+  line-height: 1.4;
+}
