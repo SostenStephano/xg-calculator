@@ -82,12 +82,13 @@ export async function gradeMatch({ leagueId, leagueName, match }) {
 export async function recomputeRollingStats(windowDays = 30) {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - windowDays);
+  console.log("Recomputing accuracy stats (cutoff: " + cutoff.toISOString() + ")...");
 
-  const snap = await getDocs(
-    query(collection(db, "accuracy"),
-      where("gradedAt", ">=", Timestamp.fromDate(cutoff)))
-  );
+  // Read ALL docs — filter by date in memory (avoids Timestamp type mismatches)
+  const snap = await getDocs(collection(db, "accuracy"));
+  console.log("   Found " + snap.size + " docs in accuracy collection");
 
+  const cutoffMs = cutoff.getTime();
   const byLeague = {};
   let total = 0, oc = 0, sc = 0, bs = 0, ll = 0;
 
@@ -95,13 +96,27 @@ export async function recomputeRollingStats(windowDays = 30) {
     const data = d.data();
     const g = data.graded;
     if (!g) return;
+
+    // Robust timestamp extraction
+    let tsMs = 0;
+    const t = data.gradedAt;
+    if (t) {
+      if (typeof t.toDate === "function") tsMs = t.toDate().getTime();
+      else if (t.seconds) tsMs = t.seconds * 1000;
+      else if (t instanceof Date) tsMs = t.getTime();
+      else if (typeof t === "string") tsMs = new Date(t).getTime();
+      else if (typeof t === "number") tsMs = t;
+    }
+    // If timestamp is unknown, include the doc (assume recent)
+    if (tsMs && tsMs < cutoffMs) return;
+
     total++;
     if (g.outcomeCorrect) oc++;
     if (g.scorelineCorrect) sc++;
-    bs += g.brierScore;
-    ll += g.logLoss;
+    bs += g.brierScore || 0;
+    ll += g.logLoss || 0;
 
-    const key = String(data.leagueId);
+    const key = String(data.leagueId || "unknown");
     if (!byLeague[key]) byLeague[key] = {
       leagueId: data.leagueId, leagueName: data.leagueName,
       total: 0, oc: 0, sc: 0, bs: 0, ll: 0
@@ -110,15 +125,17 @@ export async function recomputeRollingStats(windowDays = 30) {
     l.total++;
     if (g.outcomeCorrect) l.oc++;
     if (g.scorelineCorrect) l.sc++;
-    l.bs += g.brierScore;
-    l.ll += g.logLoss;
+    l.bs += g.brierScore || 0;
+    l.ll += g.logLoss || 0;
   });
 
   const ls = {};
   for (const k in byLeague) {
     const l = byLeague[k];
     ls[k] = {
-      leagueId: l.leagueId, leagueName: l.leagueName, total: l.total,
+      leagueId: l.leagueId,
+      leagueName: l.leagueName,
+      total: l.total,
       outcomeAccuracy: l.total ? l.oc / l.total : 0,
       scorelineAccuracy: l.total ? l.sc / l.total : 0,
       avgBrierScore: l.total ? l.bs / l.total : 0,
@@ -139,7 +156,8 @@ export async function recomputeRollingStats(windowDays = 30) {
     updatedAt: Timestamp.now()
   });
 
-  return { total, oc, sc, bs, ll };
+  console.log("Stats: " + total + " graded, " + Object.keys(ls).length + " leagues");
+  return { total };
 }
 
 // ============================================================

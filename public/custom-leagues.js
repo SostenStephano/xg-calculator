@@ -471,6 +471,15 @@ async function regeneratePredictions(leagueId, showStatus = false) {
     if (showStatus) {
       setStatus(`✅ Regenerated: ${finished.length} results · ${predWritten} predictions. Model fitted on ${finished.length} matches.`, "ok");
     }
+
+    // Recompute stats after regenerate so custom leagues appear on Accuracy page
+    try {
+      const result = await recomputeRollingStats(30);
+      if (showStatus) console.log("Stats recomputed:", result);
+    } catch (e) {
+      console.warn("Stats recompute failed:", e.message);
+    }
+
     await loadLeagues();
   } catch (err) {
     if (showStatus) setStatus("Regenerate failed: " + err.message, "err");
