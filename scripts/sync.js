@@ -494,6 +494,8 @@ async function main() {
   console.log(`\n💾 Models saved: ${Object.keys(modelsByLeague).length} leagues`);
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+  try { await recomputeAccuracyStats(); } catch (e) { console.error("Stats recompute failed:", e.message); }
+
   console.log(`\n✅ Done in ${elapsed}s — ${totalPred} predictions, ${totalRes} results, ${totalGraded} graded`);
 }
 
@@ -591,4 +593,88 @@ async function backtestAutoLeague(league, allFinished) {
   if (count > 0) await batch.commit();
 
   return { written, trainN: trainSet.length, testN: testSet.length };
+}
+
+// ============================================================
+// RECOMPUTE ACCURACY STATS
+// Reads ALL accuracy docs, filters by gradedAt (robust to type),
+// writes rolling 30-day summary to accuracyStats/rolling30d.
+// ============================================================
+async function recomputeAccuracyStats() {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 30);
+  console.log(`📊 Recomputing accuracy stats (cutoff: ${cutoff.toISOString()})...`);
+
+  const snap = await db.collection("accuracy").get();
+  console.log(`   Found ${snap.size} docs in accuracy collection`);
+
+  const cutoffMs = cutoff.getTime();
+  const byLeague = {};
+  let total = 0, oc = 0, sc = 0, bs = 0, ll = 0;
+
+  snap.forEach(ds => {
+    const d = ds.data();
+    const g = d.graded;
+    if (!g) return;
+
+    // Robust timestamp extraction
+    let tsMs = 0;
+    const t = d.gradedAt;
+    if (t) {
+      if (typeof t.toDate === "function") tsMs = t.toDate().getTime();
+      else if (t.seconds) tsMs = t.seconds * 1000;
+      else if (t instanceof Date) tsMs = t.getTime();
+      else if (typeof t === "string") tsMs = new Date(t).getTime();
+      else if (typeof t === "number") tsMs = t;
+    }
+    // If timestamp is unknown, include the doc (assume recent)
+    if (tsMs && tsMs < cutoffMs) return;
+
+    total++;
+    if (g.outcomeCorrect) oc++;
+    if (g.scorelineCorrect) sc++;
+    bs += g.brierScore || 0;
+    ll += g.logLoss || 0;
+
+    const key = String(d.leagueId || "unknown");
+    if (!byLeague[key]) byLeague[key] = {
+      leagueId: d.leagueId, leagueName: d.leagueName,
+      total: 0, oc: 0, sc: 0, bs: 0, ll: 0
+    };
+    const l = byLeague[key];
+    l.total++;
+    if (g.outcomeCorrect) l.oc++;
+    if (g.scorelineCorrect) l.sc++;
+    l.bs += g.brierScore || 0;
+    l.ll += g.logLoss || 0;
+  });
+
+  const ls = {};
+  for (const k in byLeague) {
+    const l = byLeague[k];
+    ls[k] = {
+      leagueId: l.leagueId,
+      leagueName: l.leagueName,
+      total: l.total,
+      outcomeAccuracy: l.total ? l.oc / l.total : 0,
+      scorelineAccuracy: l.total ? l.sc / l.total : 0,
+      avgBrierScore: l.total ? l.bs / l.total : 0,
+      avgLogLoss: l.total ? l.ll / l.total : 0
+    };
+  }
+
+  await db.collection("accuracyStats").doc("rolling30d").set({
+    totalPredictions: total,
+    outcomeCorrect: oc,
+    scorelineCorrect: sc,
+    outcomeAccuracy: total ? oc / total : 0,
+    scorelineAccuracy: total ? sc / total : 0,
+    avgBrierScore: total ? bs / total : 0,
+    avgLogLoss: total ? ll / total : 0,
+    byLeague: ls,
+    windowDays: 30,
+    updatedAt: Timestamp.now()
+  });
+
+  console.log(`📈 Accuracy stats: ${total} graded in window, ${Object.keys(ls).length} leagues, written to rolling30d`);
 }
