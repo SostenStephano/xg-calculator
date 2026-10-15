@@ -4,8 +4,9 @@
 // ============================================================
 
 import {
-  db, collection, doc, getDocs, setDoc, query, where, Timestamp
+  db, collection, doc, getDocs, setDoc, query, where, Timestamp, writeBatch
 } from "./firebase-config.js";
+import { fitTunableModel, predictStatsWithRho } from "./lib.js";
 
 function hashKey(str) {
   let h = 0;
@@ -139,4 +140,111 @@ export async function recomputeRollingStats(windowDays = 30) {
   });
 
   return { total, oc, sc, bs, ll };
+}
+
+// ============================================================
+// Backtest — fit model on data before a window, predict the
+// window, grade vs actual. Writes results to /accuracy.
+// ============================================================
+export async function backtestLeague({
+  leagueId,
+  leagueName,
+  allFinished,
+  params = { rho: -0.13, xi: 0.003, shrink: 8 },
+  windowDays = 21,
+  idPrefix = null
+}) {
+  if (!allFinished || allFinished.length < 30) return null;
+
+  const now = new Date();
+  const windowStart = new Date(now.getTime() - windowDays * 24 * 60 * 60 * 1000);
+
+  const sorted = [...allFinished].sort((a, b) =>
+    new Date(a.date || a.utcDate) - new Date(b.date || b.utcDate)
+  );
+
+  const trainSet = sorted.filter(m => new Date(m.date || m.utcDate) < windowStart);
+  const testSet = sorted.filter(m => {
+    const d = new Date(m.date || m.utcDate);
+    return d >= windowStart && d <= now;
+  });
+
+  if (trainSet.length < 30 || testSet.length < 3) return null;
+
+  const model = fitTunableModel(trainSet, params);
+  if (!model) return null;
+
+  const results = [];
+
+  for (const m of testSet) {
+    const stats = predictStatsWithRho(model, m.home, m.away, params.rho);
+    if (!stats) continue;
+
+    const actual = m.homeGoals > m.awayGoals ? "H" : m.homeGoals < m.awayGoals ? "A" : "D";
+    const predicted = stats.pH >= stats.pD && stats.pH >= stats.pA ? "H"
+      : stats.pA >= stats.pD ? "A" : "D";
+    const outcomeCorrect = predicted === actual;
+    const actualScore = `${m.homeGoals}-${m.awayGoals}`;
+    const top = stats.top5[0];
+    const scorelineCorrect = `${top.k}-${top.h}` === actualScore;
+
+    const av = [actual === "H" ? 1 : 0, actual === "D" ? 1 : 0, actual === "A" ? 1 : 0];
+    const pv = [stats.pH, stats.pD, stats.pA];
+    let brier = 0;
+    for (let i = 0; i < 3; i++) brier += Math.pow(pv[i] - av[i], 2);
+    brier /= 3;
+    const pActual = Math.max(
+      actual === "H" ? stats.pH : actual === "D" ? stats.pD : stats.pA,
+      1e-15
+    );
+    const logLoss = -Math.log(pActual);
+
+    // Doc ID: choose prefix (custom) or plain hash (auto)
+    const hk = hashKey(m.home + "|" + m.away + "|" + (m.date || m.utcDate || ""));
+    const docId = idPrefix ? `${idPrefix}__${hk}` : `bt__${hk}`;
+
+    results.push({
+      id: docId,
+      data: {
+        fixtureId: docId,
+        source: "backtest",
+        homeTeam: m.home,
+        awayTeam: m.away,
+        leagueId,
+        leagueName,
+        kickoff: m.date || m.utcDate ? new Date(m.date || m.utcDate) : new Date(),
+        predicted: {
+          xgHome: stats.xgHome, xgAway: stats.xgAway,
+          probHome: stats.pH, probDraw: stats.pD, probAway: stats.pA,
+          topScoreline: `${top.k}-${top.h}`,
+          topScorelineProb: top.p
+        },
+        actual: {
+          homeGoals: m.homeGoals, awayGoals: m.awayGoals,
+          outcome: actual,
+          scoreline: actualScore
+        },
+        graded: {
+          outcomeCorrect, scorelineCorrect,
+          brierScore: brier, logLoss
+        },
+        gradedAt: Timestamp.now()
+      }
+    });
+  }
+
+  // Chunked batch writes (400 per batch)
+  let written = 0;
+  const BATCH = 400;
+  for (let i = 0; i < results.length; i += BATCH) {
+    const chunk = results.slice(i, i + BATCH);
+    const batch = writeBatch(db);
+    for (const r of chunk) {
+      batch.set(doc(db, "accuracy", r.id), r.data);
+    }
+    await batch.commit();
+    written += chunk.length;
+  }
+
+  return { written, trainN: trainSet.length, testN: testSet.length };
 }

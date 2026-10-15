@@ -430,6 +430,13 @@ async function main() {
         }
         await batch.commit();
         totalRes += recent.length;
+
+        // Run 3-week backtest on this league
+        try {
+          const bt = await backtestAutoLeague(league, finished);
+          if (bt) console.log(`   Backtest: ${bt.written} graded (trained on ${bt.trainN}, tested on ${bt.testN})`);
+        } catch (e) { console.error("   Backtest failed:", e.message); }
+
         console.log(`   ${recent.length} results`);
 
         // Grade
@@ -493,3 +500,95 @@ async function main() {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 main().catch(err => { console.error("💥 Fatal:", err); process.exit(1); });
+
+// ============================================================
+// BACKTEST — fit on pre-window data, grade the last N days.
+// ============================================================
+async function backtestAutoLeague(league, allFinished) {
+  if (!allFinished || allFinished.length < 30) return null;
+
+  const now = new Date();
+  const windowStart = new Date(now.getTime() - 21 * 24 * 60 * 60 * 1000);
+
+  const sorted = [...allFinished].sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
+
+  const trainSet = sorted.filter(m => new Date(m.utcDate) < windowStart);
+  const testSet = sorted.filter(m => {
+    const d = new Date(m.utcDate);
+    return d >= windowStart && d <= now;
+  });
+
+  if (trainSet.length < 30 || testSet.length < 3) return null;
+
+  const model = fitFromMatches(trainSet);
+  if (!model) return null;
+
+  let written = 0;
+  const BATCH = 400;
+  let batch = db.batch();
+  let count = 0;
+
+  for (const m of testSet) {
+    const pred = predictOutcome(model, m.home, m.away);
+    if (!pred) continue;
+
+    const actual = m.homeGoals > m.awayGoals ? "H" : m.homeGoals < m.awayGoals ? "A" : "D";
+    const predicted = pred.pH >= pred.pD && pred.pH >= pred.pA ? "H"
+      : pred.pA >= pred.pD ? "A" : "D";
+    const outcomeCorrect = predicted === actual;
+    const actualScore = `${m.homeGoals}-${m.awayGoals}`;
+    const scorelineCorrect = pred.topScoreline === actualScore;
+
+    const av = [actual === "H" ? 1 : 0, actual === "D" ? 1 : 0, actual === "A" ? 1 : 0];
+    const pv = [pred.pH, pred.pD, pred.pA];
+    let brier = 0;
+    for (let i = 0; i < 3; i++) brier += Math.pow(pv[i] - av[i], 2);
+    brier /= 3;
+    const pActual = Math.max(
+      actual === "H" ? pred.pH : actual === "D" ? pred.pD : pred.pA,
+      1e-15
+    );
+    const logLoss = -Math.log(pActual);
+
+    // Deterministic ID: bt__LEAGUE__fixtureId
+    const docId = `bt__${league.code}__${m.fixtureId}`;
+    const ref = db.collection("accuracy").doc(docId);
+    batch.set(ref, {
+      fixtureId: docId,
+      source: "backtest",
+      homeTeam: m.home,
+      awayTeam: m.away,
+      leagueId: league.id,
+      leagueName: league.name,
+      kickoff: Timestamp.fromDate(new Date(m.utcDate)),
+      predicted: {
+        xgHome: pred.xgHome, xgAway: pred.xgAway,
+        probHome: pred.pH, probDraw: pred.pD, probAway: pred.pA,
+        topScoreline: pred.topScoreline,
+        topScorelineProb: pred.topScorelineProb
+      },
+      actual: {
+        homeGoals: m.homeGoals, awayGoals: m.awayGoals,
+        outcome: actual,
+        scoreline: actualScore
+      },
+      graded: {
+        outcomeCorrect, scorelineCorrect,
+        brierScore: brier, logLoss
+      },
+      gradedAt: Timestamp.now()
+    });
+
+    written++;
+    count++;
+    if (count >= BATCH) {
+      await batch.commit();
+      batch = db.batch();
+      count = 0;
+    }
+  }
+
+  if (count > 0) await batch.commit();
+
+  return { written, trainN: trainSet.length, testN: testSet.length };
+}

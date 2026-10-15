@@ -9,7 +9,7 @@ import {
   fitModel, predictFromModel, parseLeagueCsv, computeStats, normalizeTeamName,
   fitTunableModel, predictStatsWithRho
 } from "./lib.js";
-import { gradeMatch, recomputeRollingStats } from "./grading.js";
+import { gradeMatch, recomputeRollingStats, backtestLeague } from "./grading.js";
 
 let customLeaguesCache = [];
 let expandedLeagueId = null;
@@ -358,6 +358,19 @@ async function regeneratePredictions(leagueId, showStatus = false) {
       } catch (e) {}
     }
     if (bulkGraded > 0) console.log(`Bulk-graded ${bulkGraded} matches`);
+
+    // Run 3-week backtest to seed accuracy for matches with no live prediction
+    try {
+      const btResult = await backtestLeague({
+        leagueId,
+        leagueName: league?.name || leagueId,
+        allFinished: finished,
+        params: { rho: tuned?.rho ?? -0.13, xi: tuned?.xi ?? 0.003, shrink: tuned?.shrink ?? 8 },
+        windowDays: 21,
+        idPrefix: `custom__${leagueId}`
+      });
+      if (btResult) console.log(`Backtest: ${btResult.written} matches graded (trained on ${btResult.trainN}, tested on ${btResult.testN})`);
+    } catch (e) { console.warn("Backtest failed:", e.message); }
     if (showStatus) setStatus(`Fitting model on ${finished.length} matches…`, "info");
 
     // Read tuned hyperparameters from league doc
