@@ -510,7 +510,7 @@ async function backtestAutoLeague(league, allFinished) {
   if (!allFinished || allFinished.length < 30) return null;
 
   const now = new Date();
-  const windowStart = new Date(now.getTime() - 21 * 24 * 60 * 60 * 1000);
+  const windowStart = new Date(now.getTime() - 56 * 24 * 60 * 60 * 1000);
 
   const sorted = [...allFinished].sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
 

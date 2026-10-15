@@ -151,7 +151,7 @@ export async function backtestLeague({
   leagueName,
   allFinished,
   params = { rho: -0.13, xi: 0.003, shrink: 8 },
-  windowDays = 21,
+  windowDays = 56,
   idPrefix = null
 }) {
   if (!allFinished || allFinished.length < 30) return null;
