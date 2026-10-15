@@ -9,6 +9,7 @@ import {
   fitModel, predictFromModel, parseLeagueCsv, computeStats, normalizeTeamName,
   fitTunableModel, predictStatsWithRho
 } from "./lib.js";
+import { gradeMatch, recomputeRollingStats } from "./grading.js";
 
 let customLeaguesCache = [];
 let expandedLeagueId = null;
@@ -244,6 +245,22 @@ async function saveAllResults(leagueId, matches, panel) {
       }, { merge: true });
       createdResults++;
 
+      // Grade against existing prediction
+      try {
+        const league = customLeaguesCache.find(l => l.id === leagueId);
+        await gradeMatch({
+          leagueId,
+          leagueName: league?.name || leagueId,
+          match: {
+            home: normHome,
+            away: normAway,
+            homeGoals: u.homeGoals,
+            awayGoals: u.awayGoals,
+            date: m.date
+          }
+        });
+      } catch (e) { console.warn("Grade failed:", e.message); }
+
       saved++;
     } catch (err) {
       failures.push(`${u.match.home} vs ${u.match.away}: ${err.message}`);
@@ -278,6 +295,7 @@ async function saveAllResults(leagueId, matches, panel) {
     }
   }
 
+  try { await recomputeRollingStats(30); } catch (e) { console.warn("Stats recompute failed:", e.message); }
   await loadLeagues();
   // Reload the panel to remove the now-finished matches
   expandedLeagueId = leagueId;
@@ -327,6 +345,19 @@ async function regeneratePredictions(leagueId, showStatus = false) {
       upcoming.push(m);
     }
 
+    // Bulk-grade any existing predictions against finished matches BEFORE delete
+    let bulkGraded = 0;
+    for (const m of finished) {
+      try {
+        const r = await gradeMatch({
+          leagueId,
+          leagueName: league?.name || leagueId,
+          match: { home: m.home, away: m.away, homeGoals: m.homeGoals, awayGoals: m.awayGoals, date: m.date }
+        });
+        if (r) bulkGraded++;
+      } catch (e) {}
+    }
+    if (bulkGraded > 0) console.log(`Bulk-graded ${bulkGraded} matches`);
     if (showStatus) setStatus(`Fitting model on ${finished.length} matches…`, "info");
 
     // Read tuned hyperparameters from league doc
