@@ -5,7 +5,7 @@ import {
 } from "./lib.js";
 
 // ═══════════ ROUTER ═══════════
-const PAGES = ["fixtures", "accumulator", "results", "accuracy", "tuning", "custom-leagues", "custom"];
+const PAGES = ["fixtures", "accumulator", "results", "accuracy", "custom-leagues", "custom"];
 function getCurrentPage() {
   const h = (location.hash || "").replace(/^#/, "");
   return PAGES.includes(h) ? h : "fixtures";
