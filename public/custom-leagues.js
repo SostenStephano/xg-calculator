@@ -6,7 +6,8 @@ import {
   db, collection, doc, getDocs, setDoc, deleteDoc, query, where, writeBatch
 } from "./firebase-config.js";
 import {
-  fitModel, predictFromModel, parseLeagueCsv, computeStats, normalizeTeamName
+  fitModel, predictFromModel, parseLeagueCsv, computeStats, normalizeTeamName,
+  fitTunableModel, predictStatsWithRho
 } from "./lib.js";
 
 let customLeaguesCache = [];
@@ -327,7 +328,16 @@ async function regeneratePredictions(leagueId, showStatus = false) {
     }
 
     if (showStatus) setStatus(`Fitting model on ${finished.length} matches…`, "info");
-    const model = fitModel(finished);
+
+    // Read tuned hyperparameters from league doc
+    const leagueDoc = await getDocs(query(collection(db, "customLeagues"), where("__name__", "==", leagueId)));
+    let tuned = { rho: -0.13, xi: 0.003, shrink: 8 };
+    leagueDoc.forEach(d => {
+      const data = d.data();
+      if (data.tunedParams) tuned = data.tunedParams;
+    });
+    if (showStatus) setStatus(`Fitting model (rho=${tuned.rho}, xi=${tuned.xi}, K=${tuned.shrink}) on ${finished.length} matches…`, "info");
+    const model = fitTunableModel(finished, tuned);
 
     // Delete old custom results
     let delResCount = 0;
@@ -384,7 +394,8 @@ async function regeneratePredictions(leagueId, showStatus = false) {
         for (const m of chunk) {
           const pred = predictFromModel(model, m.home, m.away);
           if (!pred) continue;
-          const stats = computeStats(pred.xgHome, pred.xgAway);
+          const stats = predictStatsWithRho(model, m.home, m.away, tuned.rho);
+          if (!stats) continue;
           const top = stats.top5[0];
           const docId = `custom__${leagueId}__${hashKey(m.home + "|" + m.away + "|" + (m.date || ""))}`;
           const ref = doc(db, "predictions", docId);

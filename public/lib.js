@@ -404,3 +404,105 @@ export function normalizeTeamName(name) {
   const key = String(name).toLowerCase().trim();
   return TEAM_ALIASES[key] || name.trim();
 }
+
+// ============================================================
+// TUNABLE MODEL FIT — accepts rho, xi, shrink as parameters
+// ============================================================
+export function fitTunableModel(matches, { rho = -0.13, xi = 0.003, shrink = 8 } = {}) {
+  if (matches.length < 15) return null;
+  const sorted = [...matches].sort((a, b) => new Date(a.date || a.utcDate) - new Date(b.date || b.utcDate));
+  const n = sorted.length;
+
+  // Time weights
+  const weights = sorted.map((_, i) => Math.exp(-xi * (n - 1 - i)));
+
+  // Weighted means
+  let wSum = 0, wHome = 0, wAway = 0;
+  for (let i = 0; i < n; i++) {
+    wSum += weights[i];
+    wHome += weights[i] * sorted[i].homeGoals;
+    wAway += weights[i] * sorted[i].awayGoals;
+  }
+  const avgH = wHome / wSum;
+  const avgA = wAway / wSum;
+
+  const sl = x => Math.log(Math.max(x, 1e-9));
+  const mu = sl(avgA);
+  const muHome = sl(avgH) - sl(avgA);
+
+  // Team stats
+  const ts = {};
+  for (let i = 0; i < n; i++) {
+    const m = sorted[i], w = weights[i];
+    if (!ts[m.home]) ts[m.home] = { fW: 0, aW: 0, w: 0 };
+    if (!ts[m.away]) ts[m.away] = { fW: 0, aW: 0, w: 0 };
+    ts[m.home].fW += w * m.homeGoals;
+    ts[m.home].aW += w * m.awayGoals;
+    ts[m.home].w += w;
+    ts[m.away].fW += w * m.awayGoals;
+    ts[m.away].aW += w * m.homeGoals;
+    ts[m.away].w += w;
+  }
+
+  // Shrinkage
+  const teams = {};
+  for (const nm in ts) {
+    const s = ts[nm];
+    const rawAtt = sl(s.fW / s.w) - mu;
+    const rawDef = sl(s.aW / s.w) - mu;
+    const k = shrink;
+    const sh = s.w / (s.w + k);
+    teams[nm] = { att: sh * rawAtt, def: sh * rawDef };
+  }
+
+  return { mu, muHome, teams, matchesUsed: n, params: { rho, xi, shrink } };
+}
+
+// Compute a score matrix from a model + matchup, honoring rho
+export function predictStatsWithRho(model, home, away, rho = -0.13) {
+  const h = model.teams[home], a = model.teams[away];
+  if (!h || !a) return null;
+  const xgHome = Math.exp(model.mu) * Math.exp(model.muHome) * Math.exp(h.att) * Math.exp(a.def);
+  const xgAway = Math.exp(model.mu) * Math.exp(a.att) * Math.exp(h.def);
+  return computeStatsWithRho(xgHome, xgAway, rho);
+}
+
+// computeStats with configurable rho (the existing one hardcodes -0.13)
+export function computeStatsWithRho(xh, xa, rho = -0.13) {
+  const mg = 8;
+  const matrix = buildScoreMatrixRho(xh, xa, mg, rho);
+  let pH = 0, pD = 0, pA = 0;
+  let pBTTS_yes = 0, pO15 = 0, pO25 = 0, pO35 = 0, pO45 = 0;
+  const scores = [];
+  for (let k = 0; k <= mg; k++) {
+    for (let h = 0; h <= mg; h++) {
+      const p = matrix[k][h];
+      const total = k + h;
+      if (k > h) pH += p; else if (k === h) pD += p; else pA += p;
+      if (k > 0 && h > 0) pBTTS_yes += p;
+      if (total > 1.5) pO15 += p;
+      if (total > 2.5) pO25 += p;
+      if (total > 3.5) pO35 += p;
+      if (total > 4.5) pO45 += p;
+      scores.push({ k, h, p });
+    }
+  }
+  scores.sort((a, b) => b.p - a.p);
+  return { pH, pD, pA, pBTTS_yes, pO15, pO25, pO35, pO45, top5: scores.slice(0, 5) };
+}
+
+function buildScoreMatrixRho(xh, xa, mg, rho) {
+  const m = [];
+  for (let k = 0; k <= mg; k++) {
+    m[k] = [];
+    for (let h = 0; h <= mg; h++) {
+      let p = poissonPmf(k, xh) * poissonPmf(h, xa);
+      p *= dixonColesTau(k, h, xh, xa, rho);
+      m[k][h] = Math.max(p, 0);
+    }
+  }
+  let t = 0;
+  for (let k = 0; k <= mg; k++) for (let h = 0; h <= mg; h++) t += m[k][h];
+  if (t > 0) for (let k = 0; k <= mg; k++) for (let h = 0; h <= mg; h++) m[k][h] /= t;
+  return m;
+}
