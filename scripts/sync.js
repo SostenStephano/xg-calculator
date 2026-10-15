@@ -192,17 +192,17 @@ function fullBacktest(currentSeasonFinished, prevSeasonFinished) {
   const hasPrev = prevSeasonFinished.length > 0;
 
   const stats = {
-    current: { total: 0, correct: 0, scoreCorrect: 0, byActual: { H: [0, 0], D: [0, 0], A: [0, 0] } },
-    blended: { total: 0, correct: 0, scoreCorrect: 0, byActual: { H: [0, 0], D: [0, 0], A: [0, 0] } }
+    current: { total: 0, correct: 0, scoreCorrect: 0, byActual: { H: [0, 0], D: [0, 0], A: [0, 0] }, details: [] },
+    blended: { total: 0, correct: 0, scoreCorrect: 0, byActual: { H: [0, 0], D: [0, 0], A: [0, 0] }, details: [] }
   };
 
   for (let i = MIN_TRAIN_MATCHES; i < n; i++) {
     const testMatch = sorted[i];
     const trainCurrent = sorted.slice(0, i);
     const actual = outcomeOf(testMatch.homeGoals, testMatch.awayGoals);
-    const actualScore = `${testMatch.homeGoals}-${testMatch.awayGoals}`;
+    const actualScore = testMatch.homeGoals + "-" + testMatch.awayGoals;
+    const av = [actual === "H" ? 1 : 0, actual === "D" ? 1 : 0, actual === "A" ? 1 : 0];
 
-    // --- Approach 1: Current season only ---
     const modelCur = fitFromMatches(trainCurrent, {});
     if (modelCur) {
       const pred = predictOutcome(modelCur, testMatch.home, testMatch.away);
@@ -214,10 +214,23 @@ function fullBacktest(currentSeasonFinished, prevSeasonFinished) {
         stats.current.byActual[actual][0]++;
         if (oc) { stats.current.correct++; stats.current.byActual[actual][1]++; }
         if (sc) stats.current.scoreCorrect++;
+        const pv = [pred.pH, pred.pD, pred.pA];
+        let brier = 0;
+        for (let k = 0; k < 3; k++) brier += Math.pow(pv[k] - av[k], 2);
+        brier /= 3;
+        const pAct = Math.max(actual === "H" ? pred.pH : actual === "D" ? pred.pD : pred.pA, 1e-15);
+        stats.current.details.push({
+          home: testMatch.home, away: testMatch.away, date: testMatch.utcDate,
+          predictedScore: pred.topScoreline, actualScore: actualScore,
+          actualOutcome: actual, predictedOutcome: po,
+          outcomeCorrect: oc, scoreCorrect: sc,
+          brier: brier, logLoss: -Math.log(pAct),
+          xgHome: pred.xgHome, xgAway: pred.xgAway,
+          probHome: pred.pH, probDraw: pred.pD, probAway: pred.pA
+        });
       }
     }
 
-    // --- Approach 2: Blended (prev + current) ---
     if (hasPrev) {
       const blendedTrain = [...prevSeasonFinished, ...trainCurrent];
       const modelBl = fitFromMatches(blendedTrain, {
@@ -233,6 +246,20 @@ function fullBacktest(currentSeasonFinished, prevSeasonFinished) {
           stats.blended.byActual[actual][0]++;
           if (oc) { stats.blended.correct++; stats.blended.byActual[actual][1]++; }
           if (sc) stats.blended.scoreCorrect++;
+          const pv = [pred.pH, pred.pD, pred.pA];
+          let brier = 0;
+          for (let k = 0; k < 3; k++) brier += Math.pow(pv[k] - av[k], 2);
+          brier /= 3;
+          const pAct = Math.max(actual === "H" ? pred.pH : actual === "D" ? pred.pD : pred.pA, 1e-15);
+          stats.blended.details.push({
+            home: testMatch.home, away: testMatch.away, date: testMatch.utcDate,
+            predictedScore: pred.topScoreline, actualScore: actualScore,
+            actualOutcome: actual, predictedOutcome: po,
+            outcomeCorrect: oc, scoreCorrect: sc,
+            brier: brier, logLoss: -Math.log(pAct),
+            xgHome: pred.xgHome, xgAway: pred.xgAway,
+            probHome: pred.pH, probDraw: pred.pD, probAway: pred.pA
+          });
         }
       }
     }
@@ -241,15 +268,13 @@ function fullBacktest(currentSeasonFinished, prevSeasonFinished) {
   const summarize = (s) => {
     if (!s.total) return null;
     return {
-      total: s.total,
-      correct: s.correct,
-      scoreCorrect: s.scoreCorrect,
+      total: s.total, correct: s.correct, scoreCorrect: s.scoreCorrect,
       outcomeAccuracy: s.correct / s.total,
       scoreAccuracy: s.scoreCorrect / s.total,
       byActual: {
-        H: { total: s.byActual.H[0], correct: s.byActual.H[1], accuracy: s.byActual.H[0] ? s.byActual.H[1] / s.byActual.H[0] : 0 },
-        D: { total: s.byActual.D[0], correct: s.byActual.D[1], accuracy: s.byActual.D[0] ? s.byActual.D[1] / s.byActual.D[0] : 0 },
-        A: { total: s.byActual.A[0], correct: s.byActual.A[1], accuracy: s.byActual.A[0] ? s.byActual.A[1] / s.byActual.A[0] : 0 }
+        H: { total: s.byActual.H[0], correct: s.byActual.H[1] },
+        D: { total: s.byActual.D[0], correct: s.byActual.D[1] },
+        A: { total: s.byActual.A[0], correct: s.byActual.A[1] }
       }
     };
   };
@@ -265,7 +290,9 @@ function fullBacktest(currentSeasonFinished, prevSeasonFinished) {
     testSize: n - MIN_TRAIN_MATCHES,
     current: cur,
     blended: bl,
-    winner
+    winner,
+    currentDetails: stats.current.details,
+    blendedDetails: stats.blended.details
   };
 }
 
@@ -331,7 +358,55 @@ async function main() {
             console.log(`         H: ${(b.byActual.H.accuracy * 100).toFixed(0)}% (${b.byActual.H.correct}/${b.byActual.H.total}) | D: ${(b.byActual.D.accuracy * 100).toFixed(0)}% (${b.byActual.D.correct}/${b.byActual.D.total}) | A: ${(b.byActual.A.accuracy * 100).toFixed(0)}% (${b.byActual.A.correct}/${b.byActual.A.total})`);
           }
           console.log(`      Winner: ${bt.winner}`);
+        
+      // Persist backtest results to Firestore
+      try {
+        const details = (bt.winner === "blended" && bt.blendedDetails && bt.blendedDetails.length)
+          ? bt.blendedDetails
+          : (bt.currentDetails || []);
+        if (details.length > 0) {
+          const BATCH = 400;
+          let written = 0;
+          for (let x = 0; x < details.length; x += BATCH) {
+            const chunk = details.slice(x, x + BATCH);
+            const batch = db.batch();
+            for (const det of chunk) {
+              const rawKey = (det.home || "") + "|" + (det.away || "") + "|" + (det.date || "");
+              const hk = require("crypto").createHash("md5").update(rawKey).digest("hex").slice(0, 12);
+              const docId = "bt__" + league.code + "__" + hk;
+              const parts = (det.actualScore || "0-0").split("-");
+              batch.set(db.collection("accuracy").doc(docId), {
+                fixtureId: docId, source: "backtest",
+                homeTeam: det.home, awayTeam: det.away,
+                leagueId: league.id, leagueName: league.name,
+                kickoff: det.date ? Timestamp.fromDate(new Date(det.date)) : Timestamp.now(),
+                predicted: {
+                  xgHome: det.xgHome || 0, xgAway: det.xgAway || 0,
+                  probHome: det.probHome || 0, probDraw: det.probDraw || 0, probAway: det.probAway || 0,
+                  topScoreline: det.predictedScore || "?", topScorelineProb: 0
+                },
+                actual: {
+                  homeGoals: parseInt(parts[0], 10) || 0,
+                  awayGoals: parseInt(parts[1], 10) || 0,
+                  outcome: det.actualOutcome || "?", scoreline: det.actualScore || "?"
+                },
+                graded: {
+                  outcomeCorrect: !!det.outcomeCorrect,
+                  scorelineCorrect: !!det.scoreCorrect,
+                  brierScore: det.brier || 0, logLoss: det.logLoss || 0
+                },
+                gradedAt: Timestamp.now()
+              });
+            }
+            await batch.commit();
+            written += chunk.length;
+          }
+          console.log("   Wrote " + written + " backtest results to accuracy");
         }
+      } catch (e) {
+        console.error("   Failed to write backtest results:", e.message);
+      }
+}
       } else {
         console.log(`   Not enough matches for walk-forward (${finishedCurrent.length} < ${MIN_TRAIN_MATCHES + 5})`);
       }
