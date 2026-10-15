@@ -2,24 +2,48 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Auto-predictions: allow reads, block client writes
+    // ============================================================
+    // AUTO-PREDICTIONS & RESULTS: public read, no client writes
+    // (sync.js uses the Admin SDK, which bypasses these rules)
+    // ============================================================
+    // Custom leagues CAN write documents tagged with source: "custom"
     match /predictions/{docId} {
       allow read: if true;
-      allow write: if false;
+      allow create: if request.resource.data.source == "custom";
+      allow update: if request.resource.data.source == "custom"
+                    || resource.data.source == "custom";
+      allow delete: if resource.data.source == "custom";
     }
+
     match /results/{docId} {
       allow read: if true;
-      allow write: if false;
+      allow create: if request.resource.data.source == "custom";
+      allow update: if request.resource.data.source == "custom"
+                    || resource.data.source == "custom";
+      allow delete: if resource.data.source == "custom";
     }
+
+    // ============================================================
+    // OTHER COLLECTIONS: read-only from client
+    // ============================================================
     match /accuracy/{docId} {
       allow read: if true;
       allow write: if false;
     }
     match /accuracyStats/{docId} {
       allow read: if true;
-      allow write: if false;
+      // Client may recompute stats after Regenerate
+      allow write: if request.resource.data.keys().hasOnly([
+        "totalPredictions","outcomeCorrect","scorelineCorrect",
+        "outcomeAccuracy","scorelineAccuracy","avgBrierScore","avgLogLoss",
+        "byLeague","windowDays","updatedAt"
+      ]);
     }
     match /backtests/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /syncMatches/{docId} {
       allow read: if true;
       allow write: if false;
     }
@@ -27,13 +51,9 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Sync matches — auto leagues data written by sync.js, readable by tuning
-    match /syncMatches/{docId} {
-      allow read: if true;
-      allow write: if false;
-    }
-
-    // Custom leagues: client read/write
+    // ============================================================
+    // CUSTOM LEAGUES: full read/write from client
+    // ============================================================
     match /customLeagues/{docId} {
       allow read: if true;
       allow write: if true;
