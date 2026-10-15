@@ -345,32 +345,85 @@ async function regeneratePredictions(leagueId, showStatus = false) {
       upcoming.push(m);
     }
 
-    // Bulk-grade any existing predictions against finished matches BEFORE delete
+    // FAST BATCH GRADING — load once, compute in memory, write in batches
     let bulkGraded = 0;
-    for (const m of finished) {
-      try {
-        const r = await gradeMatch({
-          leagueId,
-          leagueName: league?.name || leagueId,
-          match: { home: m.home, away: m.away, homeGoals: m.homeGoals, awayGoals: m.awayGoals, date: m.date }
-        });
-        if (r) bulkGraded++;
-      } catch (e) {}
-    }
-    if (bulkGraded > 0) console.log(`Bulk-graded ${bulkGraded} matches`);
-
-    // Run 3-week backtest to seed accuracy for matches with no live prediction
     try {
-      const btResult = await backtestLeague({
-        leagueId,
-        leagueName: league?.name || leagueId,
-        allFinished: finished,
-        params: { rho: tuned?.rho ?? -0.13, xi: tuned?.xi ?? 0.003, shrink: tuned?.shrink ?? 8 },
-        windowDays: 21,
-        idPrefix: `custom__${leagueId}`
+      // 1. Load all existing accuracy docs for this league
+      const accSnap = await getDocs(query(collection(db, "accuracy"), where("leagueId", "==", leagueId)));
+      const alreadyGraded = new Set();
+      accSnap.forEach(d => alreadyGraded.add(d.id));
+
+      // 2. Load all stored predictions for this league
+      const predsSnap = await getDocs(query(collection(db, "predictions"), where("leagueId", "==", leagueId)));
+      const predByFixtureId = {};
+      predsSnap.forEach(d => {
+        const data = d.data();
+        predByFixtureId[data.fixtureId] = data;
       });
-      if (btResult) console.log(`Backtest: ${btResult.written} matches graded (trained on ${btResult.trainN}, tested on ${btResult.testN})`);
-    } catch (e) { console.warn("Backtest failed:", e.message); }
+
+      // 3. Compute grades in memory
+      const toWrite = [];
+      for (const m of finished) {
+        const normHome = normalizeTeamName(m.home);
+        const normAway = normalizeTeamName(m.away);
+        const docId = makeDocId(leagueId, normHome, normAway, m.date || "");
+        if (alreadyGraded.has(docId)) continue;
+
+        const p = predByFixtureId[docId];
+        if (!p || typeof p.probHome !== "number") continue;
+
+        const actual = m.homeGoals > m.awayGoals ? "H" : m.homeGoals < m.awayGoals ? "A" : "D";
+        const predicted = p.probHome >= p.probDraw && p.probHome >= p.probAway ? "H"
+          : p.probAway >= p.probDraw ? "A" : "D";
+        const outcomeCorrect = predicted === actual;
+        const actualScore = m.homeGoals + "-" + m.awayGoals;
+        const scorelineCorrect = p.topScoreline === actualScore;
+        const av = [actual === "H" ? 1 : 0, actual === "D" ? 1 : 0, actual === "A" ? 1 : 0];
+        const pv = [p.probHome, p.probDraw, p.probAway];
+        let brier = 0;
+        for (let k = 0; k < 3; k++) brier += Math.pow(pv[k] - av[k], 2);
+        brier /= 3;
+        const pAct = Math.max(actual === "H" ? p.probHome : actual === "D" ? p.probDraw : p.probAway, 1e-15);
+
+        toWrite.push({
+          id: docId,
+          data: {
+            fixtureId: docId,
+            source: "custom-grade",
+            homeTeam: p.homeTeam || normHome,
+            awayTeam: p.awayTeam || normAway,
+            leagueId,
+            leagueName: league?.name || leagueId,
+            kickoff: p.kickoff || (m.date ? new Date(m.date) : new Date()),
+            predicted: {
+              xgHome: p.xgHome, xgAway: p.xgAway,
+              probHome: p.probHome, probDraw: p.probDraw, probAway: p.probAway,
+              topScoreline: p.topScoreline, topScorelineProb: p.topScorelineProb
+            },
+            actual: { homeGoals: m.homeGoals, awayGoals: m.awayGoals, outcome: actual, scoreline: actualScore },
+            graded: { outcomeCorrect, scorelineCorrect, brierScore: brier, logLoss: -Math.log(pAct) },
+            gradedAt: Timestamp.now()
+          }
+        });
+      }
+
+      // 4. Batch write
+      const BATCH = 400;
+      for (let i = 0; i < toWrite.length; i += BATCH) {
+        const chunk = toWrite.slice(i, i + BATCH);
+        const batch = writeBatch(db);
+        for (const item of chunk) {
+          batch.set(doc(db, "accuracy", item.id), item.data);
+        }
+        await batch.commit();
+        bulkGraded += chunk.length;
+      }
+
+      if (bulkGraded > 0) console.log(`Bulk-graded ${bulkGraded} matches in memory`);
+    } catch (e) {
+      console.warn("Bulk-grade failed:", e.message);
+    }
+
     if (showStatus) setStatus(`Fitting model on ${finished.length} matches…`, "info");
 
     // Read tuned hyperparameters from league doc
