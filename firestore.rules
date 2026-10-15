@@ -2,7 +2,7 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Public read-only on auto-predictions and results
+    // Auto-predictions: allow reads, block client writes
     match /predictions/{docId} {
       allow read: if true;
       allow write: if false;
@@ -27,7 +27,13 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Custom leagues: client-side read/write (personal app — lock down later)
+    // Sync matches — auto leagues data written by sync.js, readable by tuning
+    match /syncMatches/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Custom leagues: client read/write
     match /customLeagues/{docId} {
       allow read: if true;
       allow write: if true;
