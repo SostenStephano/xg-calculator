@@ -433,7 +433,7 @@ async function main() {
 
         // Run 3-week backtest on this league
         try {
-          const bt = await backtestAutoLeague(league, finished);
+          const bt = await backtestAutoLeague(league, finishedCurrent);
           if (bt) console.log(`   Backtest: ${bt.written} graded (trained on ${bt.trainN}, tested on ${bt.testN})`);
         } catch (e) { console.error("   Backtest failed:", e.message); }
 
