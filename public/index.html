@@ -315,6 +315,79 @@ Bayern Munich,Bayer Leverkusen,3 - 0
     </div>
   </section>
 
+
+  <!-- ══════════════ TUNING PAGE ══════════════ -->
+  <section id="page-tuning" class="page hidden">
+    <h1>🎯 Model Tuning</h1>
+    <p class="subtitle">Grid-search the best rho (Dixon-Coles), xi (time decay), and shrinkage for each league using a proper train/test split.</p>
+
+    <div class="card">
+      <h2>Parameters</h2>
+      <div class="grid-2">
+        <div>
+          <label class="field-label">Custom league</label>
+          <select id="tuneLeague"></select>
+        </div>
+        <div>
+          <label class="field-label">Test set size (%)</label>
+          <select id="tuneSplit">
+            <option value="0.15">15% (fast)</option>
+            <option value="0.20" selected>20% (default)</option>
+            <option value="0.30">30% (thorough)</option>
+          </select>
+        </div>
+      </div>
+
+      <h3 class="section-title" style="margin-top:20px;">Search ranges</h3>
+      <div class="grid-2">
+        <div>
+          <label class="field-label">rho (comma-separated)</label>
+          <input type="text" id="tuneRho" value="-0.20,-0.15,-0.13,-0.10,-0.05,-0.02,0" style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:10px 12px;">
+        </div>
+        <div>
+          <label class="field-label">xi (comma-separated)</label>
+          <input type="text" id="tuneXi" value="0.001,0.003,0.005,0.008,0.012" style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:10px 12px;">
+        </div>
+      </div>
+      <div class="grid-2" style="margin-top:12px;">
+        <div>
+          <label class="field-label">shrink K (comma-separated)</label>
+          <input type="text" id="tuneShrink" value="4,6,8,10,12,16" style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:10px 12px;">
+        </div>
+      </div>
+
+      <div class="btn-row" style="margin-top:16px;">
+        <button id="btnTuneRun">🔍 Run Grid Search</button>
+        <button id="btnTuneApply" class="secondary" disabled>✅ Apply Best to League</button>
+      </div>
+
+      <div id="tuneStatus" class="status"></div>
+    </div>
+
+    <div id="tuneResultsCard" class="card hidden">
+      <h2>Results <span class="badge" id="tuneResultsBadge">—</span></h2>
+      <p class="matrix-hint">
+        Sorted by log loss (lower is better). Best row highlighted in green. Default combo marked gray.
+      </p>
+      <div style="overflow-x:auto;">
+        <table id="tuneResultsTable">
+          <thead>
+            <tr>
+              <th>rho</th>
+              <th>xi</th>
+              <th>K</th>
+              <th>Test N</th>
+              <th>Outcome %</th>
+              <th>Brier ↓</th>
+              <th>Log Loss ↓</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
 </main>
 </body>
 </html>
