@@ -272,9 +272,9 @@ function fullBacktest(currentSeasonFinished, prevSeasonFinished) {
       outcomeAccuracy: s.correct / s.total,
       scoreAccuracy: s.scoreCorrect / s.total,
       byActual: {
-        H: { total: s.byActual.H[0], correct: s.byActual.H[1] },
-        D: { total: s.byActual.D[0], correct: s.byActual.D[1] },
-        A: { total: s.byActual.A[0], correct: s.byActual.A[1] }
+        H: { total: s.byActual.H[0], correct: s.byActual.H[1], accuracy: s.byActual.H[0] ? s.byActual.H[1] / s.byActual.H[0] : 0 },
+        D: { total: s.byActual.D[0], correct: s.byActual.D[1], accuracy: s.byActual.D[0] ? s.byActual.D[1] / s.byActual.D[0] : 0 },
+        A: { total: s.byActual.A[0], correct: s.byActual.A[1], accuracy: s.byActual.A[0] ? s.byActual.A[1] / s.byActual.A[0] : 0 }
       }
     };
   };
