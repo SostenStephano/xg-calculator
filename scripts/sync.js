@@ -329,6 +329,36 @@ async function main() {
 
       console.log(`   ${finishedCurrent.length} finished, ${scheduled.length} upcoming`);
 
+      // Save finished matches to syncMatches so the tuning page can use them
+      try {
+        const BATCH = 400;
+        let ops = 0;
+        for (let x = 0; x < finishedCurrent.length; x += BATCH) {
+          const chunk = finishedCurrent.slice(x, x + BATCH);
+          const batch = db.batch();
+          for (const m of chunk) {
+            const docId = league.code + "__" + m.fixtureId;
+            batch.set(db.collection("syncMatches").doc(docId), {
+              leagueCode: league.code,
+              leagueId: league.id,
+              leagueName: league.name,
+              fixtureId: m.fixtureId,
+              home: m.home,
+              away: m.away,
+              homeGoals: m.homeGoals,
+              awayGoals: m.awayGoals,
+              date: m.utcDate,
+              status: m.status
+            }, { merge: true });
+          }
+          await batch.commit();
+          ops += chunk.length;
+        }
+        if (ops > 0) console.log("   💾 Wrote " + ops + " matches to syncMatches for tuning");
+      } catch (e) {
+        console.error("   Failed to write syncMatches:", e.message);
+      }
+
       let finishedPrev = [];
       if (finishedCurrent.length >= 20) {
         const { matches: prevMatches } = await getCompetitionMatches(league.code, baseSeason - 1);
