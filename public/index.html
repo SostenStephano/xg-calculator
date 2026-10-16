@@ -11,6 +11,7 @@
 <script type="module" src="app.js"></script>
 <script type="module" src="accumulator.js"></script>
 <script type="module" src="custom-leagues.js"></script>
+<script type="module" src="diag.js"></script>
 <script type="module" src="results.js"></script>
 <script type="module" src="accuracy.js"></script>
 </head>
@@ -314,6 +315,17 @@ Bayern Munich,Bayer Leverkusen,3 - 0
   </section>
 
 
-  </main>
+  
+  <!-- DIAGNOSTIC CARD (temporary) -->
+  <div id="diagCard" class="card" style="border-color:#dc2626;">
+    <h2 style="color:#dc2626;">🔬 Diagnostics (temporary)</h2>
+    <p class="matrix-hint">Shows raw Firestore data. Remove this card after we're done debugging.</p>
+    <div class="btn-row">
+      <button id="btnDiagRun" style="background:#dc2626;color:#fff;">Run Diagnostics</button>
+    </div>
+    <pre id="diagOutput" style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px;font-size:0.72rem;max-height:400px;overflow:auto;white-space:pre-wrap;color:#e2e8f0;margin-top:12px;">Click "Run Diagnostics"…</pre>
+  </div>
+
+</main>
 </body>
 </html>
