@@ -1,4 +1,4 @@
-import { db, collection, doc, getDoc, getDocs, query, limit } from "./firebase-config.js";
+import { db, collection, getDoc, doc, getDocs, query, where, limit } from "./firebase-config.js";
 
 const $ = id => document.getElementById(id);
 
@@ -11,55 +11,88 @@ async function runDiag() {
   const out = $("diagOutput");
   if (out) out.textContent = "Running...\n\n";
 
-  // ---- 1. accuracyStats/rolling30d ----
+  // ---- 1. Pick a custom league ----
+  let leagueId = null;
+  let leagueName = null;
   try {
-    const snap = await getDoc(doc(db, "accuracyStats", "rolling30d"));
-    if (!snap.exists()) {
-      log("❌ accuracyStats/rolling30d does NOT exist");
-    } else {
-      const d = snap.data();
-      log("=== accuracyStats/rolling30d ===");
-      log("totalPredictions: " + d.totalPredictions);
-      log("windowDays: " + d.windowDays);
-      log("updatedAt: " + (d.updatedAt?.toDate ? d.updatedAt.toDate().toISOString() : JSON.stringify(d.updatedAt)));
-      const leagues = Object.entries(d.byLeague || {});
-      log("byLeague keys (" + leagues.length + "):");
-      for (const [k, v] of leagues) {
-        log("   " + k + "  →  " + (v.leagueName || "(no name)") + "  N=" + v.total);
+    const lgSnap = await getDocs(collection(db, "customLeagues"));
+    lgSnap.forEach(d => {
+      if (!leagueId) {
+        leagueId = d.id;
+        leagueName = d.data().name || d.id;
       }
-    }
+    });
   } catch (e) {
-    log("❌ Failed to read accuracyStats: " + e.message);
+    log("❌ Failed to read customLeagues: " + e.message);
+    return;
   }
+  if (!leagueId) { log("No custom leagues"); return; }
 
+  log("=== Custom League ===");
+  log("leagueId: " + leagueId);
+  log("leagueName: " + leagueName);
   log("");
 
-  // ---- 2. Sample of accuracy collection ----
+  // ---- 2. Count predictions for this league ----
   try {
-    const q = query(collection(db, "accuracy"), limit(30));
-    const snap = await getDocs(q);
-    log("=== accuracy collection (first 30 docs) ===");
-    log("Total docs in first page: " + snap.size);
-
-    const leagueIds = new Set();
+    const pSnap = await getDocs(query(
+      collection(db, "predictions"),
+      where("leagueId", "==", leagueId)
+    ));
+    log("=== Custom Predictions ===");
+    log("Count: " + pSnap.size);
     let i = 0;
-    snap.forEach(docSnap => {
-      const d = docSnap.data();
-      leagueIds.add(d.leagueId || "(missing)");
-      if (i < 5) {
-        log("   doc#" + i + " id=" + docSnap.id.slice(0, 40));
-        log("        leagueId=" + (d.leagueId || "(missing)"));
-        log("        leagueName=" + (d.leagueName || "(missing)"));
-        log("        source=" + (d.source || "(missing)"));
+    pSnap.forEach(d => {
+      const data = d.data();
+      if (i < 3) {
+        log("   doc#" + i + " id=" + d.id);
+        log("      fixtureId=" + data.fixtureId);
+        log("      home=" + data.homeTeam + " away=" + data.awayTeam);
       }
       i++;
     });
-
-    log("");
-    log("Distinct leagueIds in sample:");
-    for (const id of leagueIds) log("   " + id);
   } catch (e) {
-    log("❌ Failed to read accuracy: " + e.message);
+    log("❌ predictions: " + e.message);
+  }
+  log("");
+
+  // ---- 3. Count accuracy docs for this league ----
+  try {
+    const aSnap = await getDocs(query(
+      collection(db, "accuracy"),
+      where("leagueId", "==", leagueId)
+    ));
+    log("=== Custom Accuracy Docs ===");
+    log("Count: " + aSnap.size);
+    let i = 0;
+    aSnap.forEach(d => {
+      const data = d.data();
+      if (i < 3) {
+        log("   doc#" + i + " id=" + d.id);
+        log("      fixtureId=" + data.fixtureId);
+        log("      source=" + data.source);
+      }
+      i++;
+    });
+  } catch (e) {
+    log("❌ accuracy: " + e.message);
+  }
+  log("");
+
+  // ---- 4. Sample custom matches (raw dates) ----
+  try {
+    const mSnap = await getDocs(query(
+      collection(db, "customMatches"),
+      where("leagueId", "==", leagueId),
+      limit(10)
+    ));
+    log("=== Custom Matches (first 10) ===");
+    mSnap.forEach(d => {
+      const m = d.data();
+      log("   " + m.home + " vs " + m.away + " | date='" + m.date + "' | goals=" + m.homeGoals + "-" + m.awayGoals);
+    });
+  } catch (e) {
+    log("❌ customMatches: " + e.message);
   }
 
   log("");
