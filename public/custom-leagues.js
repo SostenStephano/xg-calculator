@@ -27,12 +27,6 @@ function slugify(s) {
   return String(s).toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
-function hashKey(str) {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
-  return Math.abs(h).toString(36);
-}
-
 function escapeHtml(s) {
   return String(s == null ? "" : s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;")
@@ -222,7 +216,7 @@ async function saveAllResults(leagueId, matches, panel) {
       }, { merge: true });
 
       // 2. Delete the corresponding prediction (if it exists)
-      const predId = `custom__${leagueId}__${hashKey(normHome + "|" + normAway + "|" + (m.date || ""))}`;
+      const predId = `custom__${leagueId}__${makeDocId(leagueId, normHome, normAway, m.date || "")}`;
       try {
         await deleteDoc(doc(db, "predictions", predId));
         deletedPreds++;
@@ -456,7 +450,7 @@ async function regeneratePredictions(leagueId, showStatus = false) {
       const batch = writeBatch(db);
       const chunk = finished.slice(i, i + BATCH);
       for (const m of chunk) {
-        const docId = `custom__${leagueId}__${hashKey(m.home + "|" + m.away + "|" + (m.date || ""))}`;
+        const docId = `custom__${leagueId}__${makeDocId(leagueId, m.home, m.away, m.date || "")}`;
         const ref = doc(db, "results", docId);
         batch.set(ref, {
           fixtureId: docId, source: "custom",
@@ -494,7 +488,7 @@ async function regeneratePredictions(leagueId, showStatus = false) {
           const stats = predictStatsWithRho(model, m.home, m.away, tuned.rho);
           if (!stats) continue;
           const top = stats.top5[0];
-          const docId = `custom__${leagueId}__${hashKey(m.home + "|" + m.away + "|" + (m.date || ""))}`;
+          const docId = `custom__${leagueId}__${makeDocId(leagueId, m.home, m.away, m.date || "")}`;
           const ref = doc(db, "predictions", docId);
           batch.set(ref, {
             fixtureId: docId, source: "custom",
