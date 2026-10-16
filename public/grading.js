@@ -254,8 +254,22 @@ export async function backtestLeague({
   // Chunked batch writes (400 per batch)
   let written = 0;
   const BATCH = 400;
-  for (let i = 0; i < results.length; i += BATCH) {
-    const chunk = results.slice(i, i + BATCH);
+  // Skip writes for docs already in accuracy (avoid quota burn)
+  const existingIds = new Set();
+  try {
+    const checkSnap = await getDocs(collection(db, "accuracy"));
+    checkSnap.forEach(d => existingIds.add(d.id));
+  } catch (e) {
+    console.warn("Could not preload accuracy IDs:", e.message);
+  }
+
+  const toWrite = results.filter(r => !existingIds.has(r.id));
+  if (toWrite.length < results.length) {
+    console.log("   Skipped " + (results.length - toWrite.length) + " already-graded backtest docs");
+  }
+
+  for (let i = 0; i < toWrite.length; i += BATCH) {
+    const chunk = toWrite.slice(i, i + BATCH);
     const batch = writeBatch(db);
     for (const r of chunk) {
       batch.set(doc(db, "accuracy", r.id), r.data);
@@ -264,5 +278,5 @@ export async function backtestLeague({
     written += chunk.length;
   }
 
-  return { written, trainN: trainSet.length, testN: testSet.length };
+  return { written: toWrite.length, skipped: results.length - toWrite.length, trainN: trainSet.length, testN: testSet.length };
 }

@@ -9,7 +9,7 @@ import {
   fitModel, predictFromModel, parseLeagueCsv, computeStats, normalizeTeamName,
   fitTunableModel, predictStatsWithRho
 } from "./lib.js";
-import { gradeMatch, recomputeRollingStats, backtestLeague } from "./grading.js";
+import { gradeMatch, recomputeRollingStats, backtestLeague, makeDocId } from "./grading.js";
 
 let customLeaguesCache = [];
 let expandedLeagueId = null;
